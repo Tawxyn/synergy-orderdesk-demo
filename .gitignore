@@ -1,5 +1,4 @@
 orderdesk.cfg
-orderdesk.log
 bin/
 *.dbo
 *.dbr

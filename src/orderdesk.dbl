@@ -31,14 +31,12 @@ record
     tbid        ,i4
     xoff        ,i4
     cfgch       ,i4
-    logch       ,i4
     cur         ,i4
     sts         ,i4
     len         ,i4
     ix          ,i4
     rowcnt      ,i4
     initialized ,i4
-    problems    ,i4
     scale       ,d4
     scale_text  ,a10
     driver      ,a40
@@ -47,7 +45,6 @@ record
     connect     ,a512
     sqlp        ,a256
     msg         ,a1024
-    rejected    ,a2048
 proc
     xcall flags(7004020, 1)
     sts = %option(48, 1)
@@ -75,24 +72,6 @@ proc
     if (%ssc_connect(od_dbchn, connect))
         goto fail
 
-    ; Connection settings
-    logch = 0
-    open(logch, o, "orderdesk.log")
-    if (%ssc_cmd(od_dbchn, , SSQL_CMD_SSL, "3;SSL=yes;SSL_PROTOCOL=1.2"))
-        call setting_failed
-    if (%ssc_cmd(od_dbchn, , SSQL_PERFORMANCE_SQL, "yes"))
-        call setting_failed
-    if (%ssc_cmd(od_dbchn, , SSQL_CMD_NOUNICHAR, "no"))
-        call setting_failed
-    close logch
-    if (problems)
-    begin
-        xcall u_message("The " + %atrim(driver) + " driver rejected " + %string(problems) +
-&           " connection settings:\n" + %atrim(rejected) + "\n\nDetails are in orderdesk.log.",
-&           , D_ERROR)
-        goto shutdown
-    end
-
     stage = "reading server name"
     sqlp = "SELECT CONVERT(varchar(128),SERVERPROPERTY('ServerName')), DB_NAME()"
     if (%ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
@@ -110,6 +89,8 @@ proc
     xcall e_sect("OrderDesk - " + %atrim(driver), D_HEADER)
 
     xcall mb_column(mctl, "FILE", "File", , , , , "F")
+    xcall mb_entry(mctl, "FILEFRESH", "Start fresh...")
+    xcall mb_line(mctl)
     xcall mb_entry(mctl, "O_EXIT", "Exit", F4_KEY)
     xcall mb_end(mctl, colid)
     xcall mb_column(mctl, "CUST", "Customers", , , , , "C")
@@ -159,6 +140,7 @@ proc
         clear g_select
         using g_entnam select
         ("O_EXIT "),        exitloop
+        ("FILEFRESH "),     xcall start_fresh
         ("CUSBROWSE "),     xcall cust_browse(selcol)
         ("ORDNEW "),        xcall new_order(inpcol)
         ("ORDPOST "),       xcall post_batch
@@ -172,18 +154,6 @@ shutdown,
         sts = %ssc_release(od_dbchn)
     xcall u_finish
     stop
-
-setting_failed,
-    msg = ""
-    if (%ssc_getemsg(od_dbchn, msg, len))
-        msg = "unknown error"
-    incr problems
-    if (problems .eq. 1) then
-        rejected = %atrim(msg)
-    else
-        rejected = %atrim(rejected) + "\n" + %atrim(msg)
-    writes(logch, %atrim(msg))
-    return
 
 fail,
     msg = ""
@@ -1411,5 +1381,48 @@ proc
         if (buf(ix:1) .ne. " ")
             exitloop
     a_text = buf(ix, 15)
+    xreturn
+endsubroutine
+
+; Deletes the recorded runs and the orders the demo posted, after asking, so
+; the scoreboard and Compare runs start empty. Seed order 10420 stays.
+subroutine start_fresh
+.include "CONNECTDIR:ssql.def"
+.include "WND:tools.def"
+global data section odstate
+.include "ODSRC:odstate.inc"
+endglobal
+stack record work
+    cur         ,i4
+    sts         ,i4
+    sqlp        ,a128
+proc
+    init work
+    if (%u_msgbox("Delete all recorded runs and the orders the demo has posted?",
+&       D_MYESNO + D_MICONQUESTION, "Start fresh") .ne. D_MIDYES)
+        xreturn
+    sqlp = "DELETE FROM demo_runs"
+    call run_delete
+    sqlp = "DELETE FROM orders WHERE order_no > 10420"
+    call run_delete
+    if (%ssc_commit(od_dbchn))
+        goto fail
+    xcall u_message("Recorded runs and demo orders deleted.")
+    xreturn
+
+run_delete,
+    if (%ssc_open(od_dbchn, cur, sqlp, SSQL_NONSEL))
+        goto fail
+    if (%ssc_execute(od_dbchn, cur, SSQL_STANDARD))
+        goto fail
+    sts = %ssc_close(od_dbchn, cur)
+    clear cur
+    return
+
+fail,
+    xcall sql_error("Start fresh")
+    if (cur)
+        sts = %ssc_close(od_dbchn, cur)
+    sts = %ssc_rollback(od_dbchn, SSQL_TXOFF)
     xreturn
 endsubroutine
