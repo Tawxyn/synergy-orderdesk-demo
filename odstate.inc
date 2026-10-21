@@ -9,3 +9,7 @@ record
     od_client   ,a40
     od_encrypt  ,a10
     od_transport,a20
+    od_session  ,i4
+    od_packet   ,i4
+    od_version  ,a100
+    od_library  ,a260

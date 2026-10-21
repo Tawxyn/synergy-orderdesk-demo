@@ -52,8 +52,8 @@ proc
     xcall flags(7004020, 1)
     sts = %option(48, 1)
     xcall u_start(, 1)
-    ; Scales the window, its contents and the text; ORDERDESK_SCALE overrides 150%.
-    scale = 150
+    ; Scales the window, its contents and the text; ORDERDESK_SCALE overrides 175%.
+    scale = 175
     xcall getlog("ORDERDESK_SCALE", scale_text, len)
     if (len)
         scale = scale_text(1:len)
@@ -106,6 +106,7 @@ proc
         goto fail
     cur = 0
     xcall read_connection
+    xcall read_library
     xcall e_sect("OrderDesk - " + %atrim(driver) + " - " + %atrim(od_server) + " / " +
 &       %atrim(od_database), D_HEADER)
 
@@ -120,7 +121,7 @@ proc
     xcall mb_entry(mctl, "ORDPOST", "Post batch (1,000 orders)")
     xcall mb_end(mctl, colid)
     xcall mb_column(mctl, "RPT", "Reports", , , , , "R")
-    xcall mb_entry(mctl, "RPTNIGHTLY", "Nightly report (1,000,000 rows)")
+    xcall mb_entry(mctl, "RPTNIGHTLY", "Nightly report (2,000,000 rows)")
     xcall mb_line(mctl)
     xcall mb_entry(mctl, "RPTCOMPARE", "Compare runs")
     xcall mb_end(mctl, colid)
@@ -144,7 +145,7 @@ proc
     xcall add_tool(tbid, xoff, "ORDNEW", "bitmaps\new.bmp", "New order")
     xcall add_tool(tbid, xoff, "ORDPOST", "bitmaps\save.bmp", "Post batch (1,000 orders)")
     xoff = xoff + TB_STEP / 2
-    xcall add_tool(tbid, xoff, "RPTNIGHTLY", "bitmaps\print.bmp", "Nightly report (1,000,000 rows)")
+    xcall add_tool(tbid, xoff, "RPTNIGHTLY", "bitmaps\print.bmp", "Nightly report (2,000,000 rows)")
     xcall add_tool(tbid, xoff, "RPTCOMPARE", "bitmaps\preview.bmp", "Compare runs")
     xcall tb_toolbar(TB_PLACE, tbid)
 
@@ -463,7 +464,7 @@ subroutine nightly_report
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
 .include "theme.inc"
-.define REPORT_TICK, 50000
+.define REPORT_TICK, 100000
 global data section odstate
 .include "odstate.inc"
 endglobal
@@ -964,7 +965,8 @@ proc
     xreturn
 endsubroutine
 
-; Reads how SQL Server sees this connection, for the home panel.
+; Reads how SQL Server sees this connection, for the home panel. Failures
+; leave the fields blank.
 subroutine read_connection
 .include "CONNECTDIR:ssql.def"
 global data section odstate
@@ -978,16 +980,57 @@ stack record work
 proc
     init work
     sqlp = "SELECT COALESCE(s.client_interface_name, ''), " +
-&       "COALESCE(CONVERT(varchar(10), c.encrypt_option), ''), COALESCE(c.net_transport, '') " +
+&       "COALESCE(CONVERT(varchar(10), c.encrypt_option), ''), COALESCE(c.net_transport, ''), " +
+&       "@@SPID, COALESCE(c.net_packet_size, 0) " +
 &       "FROM sys.dm_exec_sessions s JOIN sys.dm_exec_connections c " +
 &       "ON c.session_id = s.session_id AND c.parent_connection_id IS NULL " +
 &       "WHERE s.session_id = @@SPID"
     if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
     begin
-        if (.not. %ssc_define(od_dbchn, cur, 3, od_client, od_encrypt, od_transport))
+        if (.not. %ssc_define(od_dbchn, cur, 5, od_client, od_encrypt, od_transport,
+&           od_session, od_packet))
             sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
         sts = %ssc_close(od_dbchn, cur)
     end
+    clear cur
+    sqlp = "SELECT CASE WHEN CHARINDEX(' (', @@VERSION) > 0 " +
+&       "THEN REPLACE(LEFT(@@VERSION, CHARINDEX(' (', @@VERSION) - 1), 'Microsoft ', '') " +
+&       "ELSE 'SQL Server' END + ', ' + CONVERT(varchar(60), SERVERPROPERTY('Edition')) + " +
+&       "', ' + CONVERT(varchar(20), SERVERPROPERTY('ProductVersion'))"
+    if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
+    begin
+        if (.not. %ssc_define(od_dbchn, cur, 1, od_version))
+            sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
+        sts = %ssc_close(od_dbchn, cur)
+    end
+    xreturn
+endsubroutine
+
+; Finds the SQL Connection driver library Windows has loaded in this process:
+; rssql.dll once the new driver has been bound, otherwise vtxapits.dll.
+subroutine read_library
+global data section odstate
+.include "odstate.inc"
+endglobal
+stack record work
+    kernel      ,i8
+    module      ,i8
+    len         ,i4
+    path        ,a260
+proc
+    init work
+    od_library = ""
+    kernel = %dll_open("kernel32.dll")
+    module = %dll_call(kernel, DLL_TYPE_WINAPI, "GetModuleHandleA", "rssql.dll" + %char(0))
+    if (.not. module)
+        module = %dll_call(kernel, DLL_TYPE_WINAPI, "GetModuleHandleA", "vtxapits.dll" + %char(0))
+    if (module)
+    begin
+        len = %dll_call(kernel, DLL_TYPE_WINAPI, "GetModuleFileNameA", module, path, %integer(260, 4))
+        if ((len .gt. 0) .and. (len .le. 260))
+            od_library = path(1:len)
+    end
+    len = %dll_close(kernel)
     xreturn
 endsubroutine
 
@@ -1017,7 +1060,7 @@ record ,x
     logo        ,[5]a53
 proc
     init work
-    xcall w_proc(WP_CREATE, od_homeid, "HOME", 19, 72)
+    xcall w_proc(WP_CREATE, od_homeid, "HOME", 20, 72)
     xcall u_logwnd(od_homeid)
     xcall w_brdr(od_homeid, WB_TITLE, "OrderDesk")
     xcall w_area(od_homeid, WA_COLOR, PAL_BODY)
@@ -1046,10 +1089,10 @@ proc
             end
         end
     end
-    xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_POS, 8, LOGO_COL,
+    xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_POS, 7, LOGO_COL,
 &       "Order entry and nightly reporting on SQL Connection")
     xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_ATTR, ATTR_LOAD + ATTR_BOLD,
-&       WD_POS, 10, 3, "Connection", WD_POS, 15, 3, "Activity", WD_ATTR, ATTR_LOAD)
+&       WD_POS, 9, 3, "Connection", WD_POS, 16, 3, "Activity", WD_ATTR, ATTR_LOAD)
     xcall u_window(D_PLACE, od_homeid, 2, 3)
     xreturn
 endsubroutine
@@ -1077,7 +1120,9 @@ stack record work
     secs        ,a16
     num1        ,a20
     num2        ,a20
-    client      ,a60
+    len         ,i4
+    session     ,a60
+    library     ,a60
     counts      ,a60
     read_text   ,a60
     write_text  ,a60
@@ -1126,25 +1171,41 @@ proc
         sts = %ssc_close(od_dbchn, cur)
     end
 
-    client = "(not reported)"
-    if (od_client)
-        client = %atrim(od_client) + ", " + %atrim(od_transport) + ", encrypted " + od_encrypt
+    xcall fmt_num(od_session, num1)
+    xcall fmt_num(od_packet, num2)
+    session = %atrim(num1) + " | " + %atrim(od_client) + " | " + %atrim(od_transport) +
+&       " | encrypted " + %atrim(od_encrypt) + " | " + %atrim(num2) + "-byte packets"
+    if (.not. od_client)
+        session = %atrim(num1) + " | client not reported"
+    library = "-"
+    len = %trim(od_library)
+    if (od_library)
+    begin
+        if (len .gt. 54) then
+            library = "..." + od_library(len - 50:51)
+        else
+            library = od_library
+    end
 
     call draw_figures
     xreturn
 
 draw_figures,
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 11, 5, WD_CLR, WDC_EOL, "Driver      ",
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 10, 5, WD_CLR, WDC_EOL, "Driver      ",
 &       WD_COLOR, PAL_FIGURE, od_driver)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 11, 5, WD_CLR, WDC_EOL, "Library     ",
+&       WD_COLOR, PAL_FIGURE, library)
     xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 12, 5, WD_CLR, WDC_EOL, "Server      ",
 &       WD_COLOR, PAL_FIGURE, %atrim(od_server) + " / " + od_database)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 13, 5, WD_CLR, WDC_EOL, "Client      ",
-&       WD_COLOR, PAL_FIGURE, client)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 16, 5, WD_CLR, WDC_EOL, "Data        ",
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 13, 5, WD_CLR, WDC_EOL, "Version     ",
+&       WD_COLOR, PAL_FIGURE, od_version)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 14, 5, WD_CLR, WDC_EOL, "Session     ",
+&       WD_COLOR, PAL_FIGURE, session)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 17, 5, WD_CLR, WDC_EOL, "Data        ",
 &       WD_COLOR, PAL_FIGURE, counts)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 17, 5, WD_CLR, WDC_EOL, "Last read   ",
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 18, 5, WD_CLR, WDC_EOL, "Last read   ",
 &       WD_COLOR, PAL_FIGURE, read_text)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 18, 5, WD_CLR, WDC_EOL, "Last write  ",
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 19, 5, WD_CLR, WDC_EOL, "Last write  ",
 &       WD_COLOR, PAL_FIGURE, write_text)
     return
 endsubroutine

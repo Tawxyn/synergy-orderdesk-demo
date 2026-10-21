@@ -3,7 +3,7 @@
 Live demo for DevPartner 2026, "Rebuilding SQL Connection from the Ground Up".
 
 - `orderdesk.dbl` is a UI Toolkit order-entry app: browse customers, place an
-  order, post a batch of 1,000 orders, run a 1,000,000-row nightly report, and
+  order, post a batch of 1,000 orders, run a 2,000,000-row nightly report, and
   compare the timed runs of both drivers. It also applies three old connection
   settings at startup that the new driver no longer accepts.
 - `bench.dbl` is the console version of the timed steps, for clean numbers and
@@ -49,9 +49,9 @@ starts with `vtx12_syn:`, only one driver loads at a time, and
    **SQL Server and Windows Authentication mode**, then **Restart**. Once.
 2. **VM, SSMS:** **New Query**, paste `setup.sql`, turn on **Query > SQLCMD
    Mode**, add `:setvar DemoPassword "1234"` as the first line, **Execute**.
-   It rebuilds `OrderDesk` (about 30 seconds). Rerun it whenever `setup.sql`
+   It rebuilds `OrderDesk` (about a minute). Rerun it whenever `setup.sql`
    changes.
-3. **Laptop, PowerShell:** enter `1234` when asked; expect `1000000`.
+3. **Laptop, PowerShell:** enter `1234` when asked; expect `2000000`.
 
    ```powershell
    sqlcmd -S DESKTOP-NGU3456.mshome.net -U orderdesk -C -Q "SELECT COUNT(*) FROM report_rows"
@@ -101,9 +101,11 @@ programs with `dbs`.
     Present your Windows ratios, not the Linux ones.
 15. Rehearse the Claude segment with the exact prompt below, and time it.
 16. Check the app is readable from the back row with two windows side by side.
-    OrderDesk scales itself to 150%; `set ORDERDESK_SCALE=175` (or any
-    percentage) before `dbr orderdesk` to change it. Menus, toolbar and message
-    boxes follow Windows display scaling instead.
+    Start OrderDesk with `run` (not `dbr orderdesk`): it sets
+    `SYN_RESIZE_SCALE=1`, so maximizing the window scales its contents to the
+    screen. The starting size is 175%; `set ORDERDESK_SCALE=` another percentage
+    to change it. Menus, toolbar and message boxes follow Windows display
+    scaling instead.
 17. Turn Wi-Fi off and run everything except the Claude segment. Claude needs
     the internet: use a phone hotspot for that segment only.
 18. Record one clean run as a fallback video.
@@ -159,6 +161,7 @@ The show, about 7 minutes:
 | `theme.inc` | OrderDesk's colour palette entries |
 | `bitmaps\` | Toolbar icons, from the UI Toolkit examples |
 | `build.bat` | Builds all three |
+| `run.bat` | Starts OrderDesk with scale-on-maximize |
 | `orderdesk.cfg.example` | Both connect strings; copy to `orderdesk.cfg` |
 | `setup.sql` | Database, login, grant, data and the `demo_runs` table |
 | `reset.sql` | Deletes demo orders and recorded runs |

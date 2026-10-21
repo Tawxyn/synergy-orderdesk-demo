@@ -11,6 +11,8 @@ END;
 GO
 CREATE DATABASE OrderDesk;
 GO
+ALTER DATABASE OrderDesk SET RECOVERY SIMPLE;
+GO
 IF SUSER_ID('orderdesk') IS NULL
     CREATE LOGIN orderdesk WITH PASSWORD = '$(DemoPassword)', DEFAULT_DATABASE = OrderDesk;
 ELSE
@@ -68,12 +70,13 @@ CREATE TABLE dbo.report_rows (
 WITH digits(n) AS (
     SELECT n FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9)) d(n)
 ), numbers AS (
-    SELECT 1 + a.n + 10*b.n + 100*c.n + 1000*d.n + 10000*e.n + 100000*f.n AS id
+    SELECT 1 + a.n + 10*b.n + 100*c.n + 1000*d.n + 10000*e.n + 100000*f.n + 1000000*g.n AS id
     FROM digits a CROSS JOIN digits b CROSS JOIN digits c
     CROSS JOIN digits d CROSS JOIN digits e CROSS JOIN digits f
+    CROSS JOIN (VALUES (0),(1)) g(n)
 )
 INSERT INTO dbo.report_rows (id, amount, payload)
 SELECT id, CONVERT(decimal(18,4), id * CONVERT(decimal(18,4), 0.0001)), REPLICATE('X', 128)
 FROM numbers
-WHERE id <= 1000000;
+WHERE id <= 2000000;
 GO

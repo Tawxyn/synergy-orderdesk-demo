@@ -6,7 +6,7 @@
 .main
     .include "CONNECTDIR:ssql.def"
 
-.define READ_TICK, 100000
+.define READ_TICK, 200000
 .define WRITE_ORDERS, 1000
 .define WRITE_TICK, 100
 
