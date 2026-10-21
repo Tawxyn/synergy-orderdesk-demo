@@ -55,14 +55,16 @@ proc
     if (len)
         scale = scale_text(1:len)
     xcall u_wndfont(D_SETSCALE, scale)
-    xcall w_proc(WP_PALET, PAL_BODY, 0, 7)
+    xcall w_proc(WP_PALET, PAL_BODY, 0, 15)
     xcall w_proc(WP_PALET, PAL_HEAD, 0, 3)
-    xcall w_proc(WP_PALET, PAL_LOGO, 0, 2)
-    xcall w_proc(WP_PALET, PAL_FIGURE, 0, 6)
+    xcall w_proc(WP_PALET, PAL_LEGACY, 0, 6)
+    xcall w_proc(WP_PALET, PAL_FIGURE, 0, 7)
+    xcall w_proc(WP_PALET, PAL_NEW, 0, 2)
     xcall e_sect("OrderDesk", D_HEADER)
 
     .include "ODSRC:config.inc"
     od_driver = driver
+    xcall accent_for(driver, od_accent)
 
     stage = "connecting"
     od_dbchn = 1
@@ -897,6 +899,9 @@ subroutine show_progress
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
 .include "ODSRC:theme.inc"
+global data section odstate
+.include "ODSRC:odstate.inc"
+endglobal
 .define BAR_WIDTH, 40
 stack record work
     filled      ,i4
@@ -921,10 +926,10 @@ proc
         filled = BAR_WIDTH
     track = "........................................"
     if (filled)
-        xcall w_disp(a_wid, WD_COLOR, PAL_LOGO, WD_POS, 2, 4, WD_ATTR, ATTR_LOAD + ATTR_RVRS,
+        xcall w_disp(a_wid, WD_COLOR, od_accent, WD_POS, 2, 4, WD_ATTR, ATTR_LOAD + ATTR_RVRS,
 &           solid(1:filled), WD_ATTR, ATTR_LOAD)
     if (filled .lt. BAR_WIDTH)
-        xcall w_disp(a_wid, WD_COLOR, PAL_LOGO, WD_POS, 2, 4 + filled, track(1:BAR_WIDTH - filled))
+        xcall w_disp(a_wid, WD_COLOR, od_accent, WD_POS, 2, 4 + filled, track(1:BAR_WIDTH - filled))
     xcall fmt_num(a_done, done_text)
     xcall fmt_num(a_total, total_text)
     xcall w_disp(a_wid, WD_COLOR, PAL_BODY, WD_POS, 4, 4, WD_CLR, WDC_EOL,
@@ -1070,7 +1075,7 @@ proc
                     if (row(col:1) .ne. "#")
                         exitloop
                 end
-                xcall w_disp(od_homeid, WD_COLOR, PAL_LOGO, WD_POS, r + 1, logo_col + start - 1,
+                xcall w_disp(od_homeid, WD_COLOR, od_accent, WD_POS, r + 1, logo_col + start - 1,
 &                   WD_ATTR, ATTR_LOAD + ATTR_RVRS, blanks(1:col - start), WD_ATTR, ATTR_LOAD)
             end
         end
@@ -1112,6 +1117,7 @@ stack record work
     count       ,i4
     slowest     ,i4
     filled      ,i4
+    accent      ,i4
     step        ,a10
     driver      ,a40
     secs        ,a16
@@ -1194,7 +1200,7 @@ proc
     end
 
     xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 10, 6, WD_CLR, WDC_EOL, "Driver      ",
-&       WD_COLOR, PAL_FIGURE, od_driver)
+&       WD_COLOR, od_accent, od_driver)
     xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 11, 6, WD_CLR, WDC_EOL, "Library     ",
 &       WD_COLOR, PAL_FIGURE, library)
     xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 12, 6, WD_CLR, WDC_EOL, "Server      ",
@@ -1239,12 +1245,9 @@ draw_step,
         slowest = run_tenths[first + 1]
     for ix from first thru first + count - 1
     begin
-        if (run_driver[ix] .eqs. od_driver) then
-            xcall w_disp(od_homeid, WD_COLOR, PAL_FIGURE, WD_POS, srow + ix - first, 14,
-&               run_driver[ix](1:18))
-        else
-            xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, srow + ix - first, 14,
-&               run_driver[ix](1:18))
+        xcall accent_for(run_driver[ix], accent)
+        xcall w_disp(od_homeid, WD_COLOR, accent, WD_POS, srow + ix - first, 14,
+&           run_driver[ix](1:18))
         filled = 1
         if (slowest .gt. 0)
             filled = (run_tenths[ix] * SCORE_BAR + slowest / 2) / slowest
@@ -1252,7 +1255,7 @@ draw_step,
             filled = 1
         if (filled .gt. SCORE_BAR)
             filled = SCORE_BAR
-        xcall w_disp(od_homeid, WD_COLOR, PAL_LOGO, WD_POS, srow + ix - first, 32,
+        xcall w_disp(od_homeid, WD_COLOR, accent, WD_POS, srow + ix - first, 32,
 &           WD_ATTR, ATTR_LOAD + ATTR_RVRS, blanks(1:filled), WD_ATTR, ATTR_LOAD)
         xcall fmt_secs(run_tenths[ix], secs)
         xcall fmt_num(run_trips[ix], num1)
@@ -1424,5 +1427,24 @@ fail,
     if (cur)
         sts = %ssc_close(od_dbchn, cur)
     sts = %ssc_rollback(od_dbchn, SSQL_TXOFF)
+    xreturn
+endsubroutine
+
+; Returns the palette entry for a driver's accent colour: green for the new
+; driver's connect-string prefixes, amber for everything else.
+subroutine accent_for
+    a_driver    ,a
+    a_palette   ,n
+.include "ODSRC:theme.inc"
+stack record work
+    token       ,a40
+proc
+    init work
+    token = a_driver
+    upcase token
+    if ((token .eqs. "SQLSERVER") .or. (token .eqs. "VTX12_SYN")) then
+        a_palette = PAL_NEW
+    else
+        a_palette = PAL_LEGACY
     xreturn
 endsubroutine

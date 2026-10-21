@@ -3,6 +3,7 @@
 record
     od_dbchn    ,d1
     od_homeid   ,i4
+    od_accent   ,i4
     od_driver   ,a40
     od_server   ,a128
     od_database ,a128
