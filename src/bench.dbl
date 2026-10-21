@@ -7,8 +7,9 @@
     .include "CONNECTDIR:ssql.def"
 
 .define READ_TICK, 200000
-.define WRITE_ORDERS, 1000
-.define WRITE_TICK, 100
+.define WRITE_ORDERS, 50000
+.define WRITE_COMMIT, 1000
+.define WRITE_TICK, 5000
 
     record
         dbchn,          d1, 1
@@ -21,6 +22,7 @@
         rowcnt,         i4
         rows,           i4
         tick,           i4
+        pending,        i4
         initialized,    i4
         cust_id,        i4
         order_no,       i4
@@ -143,8 +145,13 @@
         incr order_no
         if (%ssc_execute(dbchn, cur, SSQL_STANDARD))
             goto fail
-        if (%ssc_commit(dbchn))
-            goto fail
+        incr pending
+        if (pending .eq. WRITE_COMMIT)
+        begin
+            if (%ssc_commit(dbchn))
+                goto fail
+            clear pending
+        end
         incr rows
         incr tick
         if (tick .eq. WRITE_TICK)
@@ -153,11 +160,16 @@
             clear tick
         end
     end
+    if (pending)
+    begin
+        if (%ssc_commit(dbchn))
+            goto fail
+    end
     if (%ssc_close(dbchn, cur))
         goto fail
     cur = 0
     call stop_timer
-    writes(1, " " + %string(rows, "Z,ZZX") + " orders in " + %atrim(secs_text) +
+    writes(1, " " + %string(rows, "ZZZ,ZZX") + " orders in " + %atrim(secs_text) +
 &       %string(trips, "ZZZZ,ZZX") + " round trips")
 
     if (%ssc_release(dbchn))

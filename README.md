@@ -3,7 +3,7 @@
 Live demo for DevPartner 2026, "Rebuilding SQL Connection from the Ground Up".
 
 - `src\orderdesk.dbl` is a UI Toolkit order-entry app: browse customers, place an
-  order, post a batch of 1,000 orders, run a 2,000,000-row nightly report, and
+  order, post a batch of 50,000 orders, run a 2,000,000-row nightly report, and
   compare the timed runs of both drivers. It also applies three old connection
   settings at startup that the new driver no longer accepts.
 - `src\bench.dbl` is the console version of the timed steps, for clean numbers and
@@ -26,9 +26,9 @@ What the demo shows, and what not to claim:
   Trifox still loads at `%SSC_INIT`.
 - **Reads.** Fewer round trips and a shorter time. Measured on Linux: about 11x
   fewer round trips and 2.4x faster. Measure Windows yourself.
-- **Writes.** One transaction per order. Measured on Linux: 3 round trips per
-  order on legacy, 2 on the new driver, about the same time. Don't claim writes
-  are faster.
+- **Writes.** 50,000 orders through one prepared insert, committed every
+  1,000. Measured on Linux, reused inserts took about the same time on both
+  drivers. Don't claim writes are faster unless your Windows numbers show it.
 - **Errors** (`errors.dbl`, for Q&A). Same SQLCODE for ordinary SQL errors with
   the server's message; for a procedure call SQL Server rejects, legacy reports
   `-1` "not found" while the new driver reports the real error.

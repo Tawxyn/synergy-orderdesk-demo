@@ -107,8 +107,7 @@ proc
     cur = 0
     xcall read_connection
     xcall read_library
-    xcall e_sect("OrderDesk - " + %atrim(driver) + " - " + %atrim(od_server) + " / " +
-&       %atrim(od_database), D_HEADER)
+    xcall e_sect("OrderDesk - " + %atrim(driver), D_HEADER)
 
     xcall mb_column(mctl, "FILE", "File", , , , , "F")
     xcall mb_entry(mctl, "O_EXIT", "Exit", F4_KEY)
@@ -118,7 +117,7 @@ proc
     xcall mb_end(mctl, colid)
     xcall mb_column(mctl, "ORD", "Orders", , , , , "O")
     xcall mb_entry(mctl, "ORDNEW", "New order")
-    xcall mb_entry(mctl, "ORDPOST", "Post batch (1,000 orders)")
+    xcall mb_entry(mctl, "ORDPOST", "Post batch (50,000 orders)")
     xcall mb_end(mctl, colid)
     xcall mb_column(mctl, "RPT", "Reports", , , , , "R")
     xcall mb_entry(mctl, "RPTNIGHTLY", "Nightly report (2,000,000 rows)")
@@ -143,7 +142,7 @@ proc
     xoff = TB_INDENT
     xcall add_tool(tbid, xoff, "CUSBROWSE", "assets\open.bmp", "Browse customers")
     xcall add_tool(tbid, xoff, "ORDNEW", "assets\new.bmp", "New order")
-    xcall add_tool(tbid, xoff, "ORDPOST", "assets\save.bmp", "Post batch (1,000 orders)")
+    xcall add_tool(tbid, xoff, "ORDPOST", "assets\save.bmp", "Post batch (50,000 orders)")
     xoff = xoff + TB_STEP / 2
     xcall add_tool(tbid, xoff, "RPTNIGHTLY", "assets\print.bmp", "Nightly report (2,000,000 rows)")
     xcall add_tool(tbid, xoff, "RPTCOMPARE", "assets\preview.bmp", "Compare runs")
@@ -326,7 +325,9 @@ subroutine post_batch
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
 .include "ODSRC:theme.inc"
-.define BATCH_TICK, 100
+.define BATCH_ORDERS, 50000
+.define BATCH_COMMIT, 1000
+.define BATCH_TICK, 2500
 global data section odstate
 .include "ODSRC:odstate.inc"
 endglobal
@@ -343,6 +344,7 @@ stack record work
     tick        ,i4
     cust_id     ,i4
     order_no    ,i4
+    pending     ,i4
     sqlp        ,a256
     secs        ,a16
     count_text  ,a20
@@ -357,7 +359,7 @@ stack record work
     per_query   ,i8
 proc
     init work
-    total = 1000
+    total = BATCH_ORDERS
     ; Two back-to-back counter reads measure what one read costs, so the
     ; live readings during the loop can be taken back out of the total.
     xcall read_trips(start_trips, failed, 0)
@@ -400,11 +402,21 @@ proc
         incr order_no
         if (%ssc_execute(od_dbchn, cur, SSQL_STANDARD))
             goto fail
-        if (%ssc_commit(od_dbchn))
-            goto fail
+        incr pending
+        if (pending .eq. BATCH_COMMIT)
+        begin
+            if (%ssc_commit(od_dbchn))
+                goto fail
+            clear pending
+        end
         incr tick
         if (tick .eq. BATCH_TICK)
             call progress
+    end
+    if (pending)
+    begin
+        if (%ssc_commit(od_dbchn))
+            goto fail
     end
     done = total
     sts = %ssc_close(od_dbchn, cur)
@@ -426,7 +438,7 @@ proc
     xcall verdict("Write", tenths, trips, verdict)
     if (verdict)
         verdict = "\n\n" + verdict
-    xcall u_message("Posted " + %atrim(count_text) + " orders, one transaction each" + "\n\n" + %atrim(secs) + "\n" +
+    xcall u_message("Posted " + %atrim(count_text) + " orders, committed every 1,000" + "\n\n" + %atrim(secs) + "\n" +
 &       %atrim(trips_text) + " round trips" + %atrim(verdict))
     xreturn
 
@@ -995,7 +1007,8 @@ proc
     clear cur
     sqlp = "SELECT CASE WHEN CHARINDEX(' (', @@VERSION) > 0 " +
 &       "THEN REPLACE(LEFT(@@VERSION, CHARINDEX(' (', @@VERSION) - 1), 'Microsoft ', '') " +
-&       "ELSE 'SQL Server' END + ', ' + CONVERT(varchar(60), SERVERPROPERTY('Edition')) + " +
+&       "ELSE 'SQL Server' END + ', ' + REPLACE(CONVERT(varchar(60), SERVERPROPERTY('Edition')), " +
+&       "' (64-bit)', '') + " +
 &       "', ' + CONVERT(varchar(20), SERVERPROPERTY('ProductVersion'))"
     if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
     begin
@@ -1034,12 +1047,13 @@ proc
     xreturn
 endsubroutine
 
-; Creates the home panel behind every other window: the logo and headings.
+; Creates the home panel: a borderless window that fills the screen body,
+; behind every other window, with the logo and headings.
 subroutine home_create
 .include "WND:tools.def"
+.include "WND:gblctl.def"
 .include "DBLDIR:windows.def"
 .include "ODSRC:theme.inc"
-.define LOGO_COL, 10
 .define LOGO_WIDTH, 53
 global data section odstate
 .include "ODSRC:odstate.inc"
@@ -1048,6 +1062,7 @@ stack record work
     r           ,i4
     col         ,i4
     start       ,i4
+    logo_col    ,i4
     row         ,a53
     blanks      ,a53
 record logo_rows
@@ -1060,11 +1075,12 @@ record ,x
     logo        ,[5]a53
 proc
     init work
-    xcall w_proc(WP_CREATE, od_homeid, "HOME", 20, 72)
+    xcall w_proc(WP_CREATE, od_homeid, "HOME", g_last_row - g_first_row + 1, g_screen_width)
     xcall u_logwnd(od_homeid)
-    xcall w_brdr(od_homeid, WB_TITLE, "OrderDesk")
+    xcall w_brdr(od_homeid, WB_OFF)
     xcall w_area(od_homeid, WA_COLOR, PAL_BODY)
     xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_CLR, WDC_WND)
+    logo_col = (g_screen_width - LOGO_WIDTH) / 2 + 1
     for r from 1 thru 5
     begin
         row = logo[r]
@@ -1084,26 +1100,28 @@ proc
                     if (row(col:1) .ne. "#")
                         exitloop
                 end
-                xcall w_disp(od_homeid, WD_COLOR, PAL_LOGO, WD_POS, r + 1, LOGO_COL + start - 1,
+                xcall w_disp(od_homeid, WD_COLOR, PAL_LOGO, WD_POS, r + 1, logo_col + start - 1,
 &                   WD_ATTR, ATTR_LOAD + ATTR_RVRS, blanks(1:col - start), WD_ATTR, ATTR_LOAD)
             end
         end
     end
-    xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_POS, 7, LOGO_COL,
+    xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_POS, 7, logo_col + 1,
 &       "Order entry and nightly reporting on SQL Connection")
     xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_ATTR, ATTR_LOAD + ATTR_BOLD,
-&       WD_POS, 9, 3, "Connection", WD_POS, 16, 3, "Activity", WD_ATTR, ATTR_LOAD)
-    xcall u_window(D_PLACE, od_homeid, 2, 3)
+&       WD_POS, 9, 4, "Connection", WD_POS, 16, 4, "Activity", WD_ATTR, ATTR_LOAD)
+    xcall u_window(D_PLACE, od_homeid, g_first_row, 1)
     xreturn
 endsubroutine
 
-; Redraws the home panel figures: the connection and the latest runs on this
-; driver. Query failures leave a dash rather than interrupting the user.
+; Redraws the home panel figures: the connection, and a scoreboard of the
+; latest Read and Write run on each driver. Query failures leave a dash
+; rather than interrupting the user.
 subroutine home_refresh
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
 .include "ODSRC:theme.inc"
+.define SCORE_BAR, 22
 global data section odstate
 .include "ODSRC:odstate.inc"
 endglobal
@@ -1111,23 +1129,33 @@ stack record work
     cur         ,i4
     sts         ,i4
     rowcnt      ,i4
+    len         ,i4
+    ix          ,i4
     customers   ,i4
     orders      ,i4
-    row_count   ,i4
     tenths      ,i4
     trips       ,i8
+    nread       ,i4
+    nwrite      ,i4
+    srow        ,i4
+    first       ,i4
+    count       ,i4
+    slowest     ,i4
+    filled      ,i4
     step        ,a10
+    driver      ,a40
     secs        ,a16
     num1        ,a20
     num2        ,a20
-    len         ,i4
+    label       ,a8
     session     ,a60
     library     ,a60
     counts      ,a60
-    read_text   ,a60
-    write_text  ,a60
-    run_text    ,a60
+    blanks      ,a22
     sqlp        ,a512
+    run_driver  ,[4]a40
+    run_tenths  ,[4]i4
+    run_trips   ,[4]i8
 proc
     init work
     counts = "-"
@@ -1146,26 +1174,34 @@ proc
         end
         sts = %ssc_close(od_dbchn, cur)
     end
+    clear cur
 
-    read_text = "-"
-    write_text = "-"
-    sqlp = "SELECT step, row_count, tenths, round_trips FROM (SELECT step, row_count, tenths, " +
-&       "round_trips, ROW_NUMBER() OVER (PARTITION BY step ORDER BY id DESC) AS rn " +
-&       "FROM demo_runs WHERE driver = :1) r WHERE rn = 1"
-    if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT, SSQL_STANDARD, 1, od_driver))
+    ; Slots 1-2 hold Read runs and 3-4 Write runs, legacy first.
+    sqlp = "SELECT step, driver, tenths, round_trips FROM (SELECT step, driver, tenths, " +
+&       "round_trips, id, ROW_NUMBER() OVER (PARTITION BY driver, step ORDER BY id DESC) AS rn " +
+&       "FROM demo_runs) r WHERE rn = 1 " +
+&       "ORDER BY step, CASE WHEN driver LIKE 'VTX12%' THEN 0 ELSE 1 END, id DESC"
+    if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
     begin
-        if (.not. %ssc_define(od_dbchn, cur, 4, step, row_count, tenths, trips))
+        if (.not. %ssc_define(od_dbchn, cur, 4, step, driver, tenths, trips))
         begin
             while (%ssc_move(od_dbchn, cur, 1, rowcnt) .eq. SSQL_NORMAL)
             begin
-                xcall fmt_secs(tenths, secs)
-                xcall fmt_num(row_count, num1)
-                xcall fmt_num(trips, num2)
-                run_text = %atrim(num1) + " in " + %atrim(secs) + ", " + %atrim(num2) + " round trips"
                 if (step .eqs. "Read") then
-                    read_text = run_text
-                else
-                    write_text = run_text
+                begin
+                    if (nread .lt. 2)
+                    begin
+                        incr nread
+                        ix = nread
+                        call keep_run
+                    end
+                end
+                else if (nwrite .lt. 2)
+                begin
+                    incr nwrite
+                    ix = 2 + nwrite
+                    call keep_run
+                end
             end
         end
         sts = %ssc_close(od_dbchn, cur)
@@ -1181,32 +1217,78 @@ proc
     len = %trim(od_library)
     if (od_library)
     begin
-        if (len .gt. 54) then
-            library = "..." + od_library(len - 50:51)
+        if (len .gt. 58) then
+            library = "..." + od_library(len - 54:55)
         else
             library = od_library
     end
 
-    call draw_figures
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 10, 6, WD_CLR, WDC_EOL, "Driver      ",
+&       WD_COLOR, PAL_FIGURE, od_driver)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 11, 6, WD_CLR, WDC_EOL, "Library     ",
+&       WD_COLOR, PAL_FIGURE, library)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 12, 6, WD_CLR, WDC_EOL, "Server      ",
+&       WD_COLOR, PAL_FIGURE, %atrim(od_server) + " / " + od_database)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 13, 6, WD_CLR, WDC_EOL, "Version     ",
+&       WD_COLOR, PAL_FIGURE, od_version)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 14, 6, WD_CLR, WDC_EOL, "Session     ",
+&       WD_COLOR, PAL_FIGURE, session)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 17, 6, WD_CLR, WDC_EOL, "Data        ",
+&       WD_COLOR, PAL_FIGURE, counts)
+
+    label = "Read"
+    srow = 19
+    first = 1
+    count = nread
+    call draw_step
+    label = "Write"
+    srow = 22
+    first = 3
+    count = nwrite
+    call draw_step
     xreturn
 
-draw_figures,
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 10, 5, WD_CLR, WDC_EOL, "Driver      ",
-&       WD_COLOR, PAL_FIGURE, od_driver)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 11, 5, WD_CLR, WDC_EOL, "Library     ",
-&       WD_COLOR, PAL_FIGURE, library)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 12, 5, WD_CLR, WDC_EOL, "Server      ",
-&       WD_COLOR, PAL_FIGURE, %atrim(od_server) + " / " + od_database)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 13, 5, WD_CLR, WDC_EOL, "Version     ",
-&       WD_COLOR, PAL_FIGURE, od_version)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 14, 5, WD_CLR, WDC_EOL, "Session     ",
-&       WD_COLOR, PAL_FIGURE, session)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 17, 5, WD_CLR, WDC_EOL, "Data        ",
-&       WD_COLOR, PAL_FIGURE, counts)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 18, 5, WD_CLR, WDC_EOL, "Last read   ",
-&       WD_COLOR, PAL_FIGURE, read_text)
-    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 19, 5, WD_CLR, WDC_EOL, "Last write  ",
-&       WD_COLOR, PAL_FIGURE, write_text)
+keep_run,
+    run_driver[ix] = driver
+    run_tenths[ix] = tenths
+    run_trips[ix] = trips
+    return
+
+; Draws up to two runs of one step on rows srow and srow + 1, with each bar
+; scaled to the slower run.
+draw_step,
+    xcall w_disp(od_homeid, WD_POS, srow, 1, WD_CLR, WDC_EOL, WD_POS, srow + 1, 1, WD_CLR, WDC_EOL)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, srow, 6, label)
+    if (.not. count)
+    begin
+        xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, srow, 14, "no runs yet")
+        return
+    end
+    slowest = run_tenths[first]
+    if ((count .gt. 1) .and. (run_tenths[first + 1] .gt. slowest))
+        slowest = run_tenths[first + 1]
+    for ix from first thru first + count - 1
+    begin
+        if (run_driver[ix] .eqs. od_driver) then
+            xcall w_disp(od_homeid, WD_COLOR, PAL_FIGURE, WD_POS, srow + ix - first, 14,
+&               run_driver[ix](1:18))
+        else
+            xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, srow + ix - first, 14,
+&               run_driver[ix](1:18))
+        filled = 1
+        if (slowest .gt. 0)
+            filled = (run_tenths[ix] * SCORE_BAR + slowest / 2) / slowest
+        if (filled .lt. 1)
+            filled = 1
+        if (filled .gt. SCORE_BAR)
+            filled = SCORE_BAR
+        xcall w_disp(od_homeid, WD_COLOR, PAL_LOGO, WD_POS, srow + ix - first, 32,
+&           WD_ATTR, ATTR_LOAD + ATTR_RVRS, blanks(1:filled), WD_ATTR, ATTR_LOAD)
+        xcall fmt_secs(run_tenths[ix], secs)
+        xcall fmt_num(run_trips[ix], num1)
+        xcall w_disp(od_homeid, WD_COLOR, PAL_FIGURE, WD_POS, srow + ix - first, 56,
+&           %atrim(secs), WD_POS, srow + ix - first, 64, %atrim(num1) + " trips")
+    end
     return
 endsubroutine
 
