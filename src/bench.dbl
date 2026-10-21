@@ -49,7 +49,7 @@
     open(1, o, "tt:")
     sts = %option(48, 1)
 
-    .include "config.inc"
+    .include "ODSRC:config.inc"
     writes(1, "Driver   " + %atrim(driver))
 
     stage = "connecting"

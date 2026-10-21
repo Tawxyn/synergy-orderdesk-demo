@@ -1,5 +1,6 @@
 orderdesk.cfg
 orderdesk.log
+bin/
 *.dbo
 *.dbr
 SSQLX.LOG

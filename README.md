@@ -2,13 +2,13 @@
 
 Live demo for DevPartner 2026, "Rebuilding SQL Connection from the Ground Up".
 
-- `orderdesk.dbl` is a UI Toolkit order-entry app: browse customers, place an
+- `src\orderdesk.dbl` is a UI Toolkit order-entry app: browse customers, place an
   order, post a batch of 1,000 orders, run a 2,000,000-row nightly report, and
   compare the timed runs of both drivers. It also applies three old connection
   settings at startup that the new driver no longer accepts.
-- `bench.dbl` is the console version of the timed steps, for clean numbers and
+- `src\bench.dbl` is the console version of the timed steps, for clean numbers and
   as a fallback.
-- `errors.dbl` runs three failing statements and prints what the driver
+- `src\errors.dbl` runs three failing statements and prints what the driver
   reports.
 
 Switching between the legacy SQL Connection driver and the new one is one line
@@ -41,15 +41,15 @@ error text and the "remove this option" messages), `rssql/perf` (read
 speedups), and an optimized Rust build. `dev.bat build` deploys an unoptimized
 debug build; never time it. On a build without driver selection, the new line
 starts with `vtx12_syn:`, only one driver loads at a time, and
-`reset-demo.ps1` cannot warm up both.
+`scripts\reset-demo.ps1` cannot warm up both.
 
 ## Part 1: Database
 
 1. **VM, SSMS (Windows authentication):** server **Properties > Security** >
    **SQL Server and Windows Authentication mode**, then **Restart**. Once.
-2. **VM, SSMS:** **New Query**, paste `setup.sql`, turn on **Query > SQLCMD
+2. **VM, SSMS:** **New Query**, paste `sql\setup.sql`, turn on **Query > SQLCMD
    Mode**, add `:setvar DemoPassword "1234"` as the first line, **Execute**.
-   It rebuilds `OrderDesk` (about a minute). Rerun it whenever `setup.sql`
+   It rebuilds `OrderDesk` (about a minute). Rerun it whenever `sql\setup.sql`
    changes.
 3. **Laptop, PowerShell:** enter `1234` when asked; expect `2000000`.
 
@@ -69,29 +69,30 @@ starts with `vtx12_syn:`, only one driver loads at a time, and
 5. **Laptop, PowerShell, in this folder:** `copy orderdesk.cfg.example
    orderdesk.cfg`; in Notepad replace both `CHANGE_ME` with `1234` and
    `10.10.10.2` with `DESKTOP-NGU3456.mshome.net`.
-6. **Laptop, Synergy x64 command prompt, in this folder:** `build`. It builds
-   `orderdesk` (linked with `WND:tklib.elb`), `bench` and `errors`.
-7. Commit the repo now. The show edits `orderdesk.dbl`, and `git restore
-   orderdesk.dbl` puts the old settings back afterwards. Also keep a commit or
+6. **Laptop, Synergy x64 command prompt, in this folder:** `build`. It compiles
+   `src\` into `bin\`: `orderdesk` (linked with `WND:tklib.elb`), `bench` and
+   `errors`.
+7. Commit the repo now. The show edits `src\orderdesk.dbl`, and `git restore
+   src\orderdesk.dbl` puts the old settings back afterwards. Also keep a commit or
    branch with the three `%ssc_cmd` lines removed, as the fallback if the live
    Claude session stalls.
 
 ## Part 4: Try it
 
-Run the UI app with `dbr` (UI Toolkit does not run under `dbs`) and the console
-programs with `dbs`.
+Start the UI app with `run` (UI Toolkit does not run under `dbs`) and the
+console programs with `dbs bin\bench` and `dbs bin\errors`, from the repo root.
 
-8. **Legacy line active:** `dbr orderdesk`. Try **Reports > Nightly report**,
+8. **Legacy line active:** `run`. Try **Reports > Nightly report**,
    **Orders > Post batch**, **Customers > Browse**, **Orders > New order**.
 9. **Switch:** in `orderdesk.cfg`, put a `;` in front of the `VTX12_SQLNATIVE`
    line and remove it from the other `SQL_CONNECT` line. Save.
-10. `dbr orderdesk` again. It stops with "rejected 3 connection settings"; the
+10. `run` again. It stops with "rejected 3 connection settings"; the
     messages are also in `orderdesk.log`.
 11. Remove the three `%ssc_cmd` lines under `; Connection settings` in
-    `orderdesk.dbl` (or let Claude do it), `build`, `dbr orderdesk`. Run the
+    `src\orderdesk.dbl` (or let Claude do it), `build`, `run`. Run the
     report and the batch, then **Reports > Compare runs**.
-12. `git restore orderdesk.dbl` and `build` to put the settings back.
-13. Reset: `powershell -ExecutionPolicy Bypass -File reset-demo.ps1`. It warms
+12. `git restore src\orderdesk.dbl` and `build` to put the settings back.
+13. Reset: `powershell -ExecutionPolicy Bypass -File scripts\reset-demo.ps1`. It warms
     up both drivers with `bench`, deletes the demo orders and runs, and makes
     the legacy line active.
 
@@ -101,7 +102,7 @@ programs with `dbs`.
     Present your Windows ratios, not the Linux ones.
 15. Rehearse the Claude segment with the exact prompt below, and time it.
 16. Check the app is readable from the back row with two windows side by side.
-    Start OrderDesk with `run` (not `dbr orderdesk`): it sets
+    Start OrderDesk with `run` (not `dbr bin\orderdesk`): it sets
     `SYN_RESIZE_SCALE=1`, so maximizing the window scales its contents to the
     screen. The starting size is 175%; `set ORDERDESK_SCALE=` another percentage
     to change it. Menus, toolbar and message boxes follow Windows display
@@ -113,7 +114,7 @@ programs with `dbs`.
 ## Part 6: Show day
 
 Before going on: AC power, best-performance mode, notifications and updates
-off; `reset-demo.ps1`; `git restore orderdesk.dbl` and `build`; two Synergy
+off; `scripts\reset-demo.ps1`; `git restore src\orderdesk.dbl` and `build`; two Synergy
 command prompts side by side in this folder; `orderdesk.cfg` open in Notepad;
 ODBC Data Sources on the User DSN tab; a Claude session open in this folder.
 
@@ -121,16 +122,16 @@ The show, about 7 minutes:
 
 1. **Pain (1 min):** slide, then `OrderDeskDSN` > **Configure**, click through,
    **Cancel**.
-2. **Before (1.5 min), left window:** `dbr orderdesk`. Nightly report, then
+2. **Before (1.5 min), left window:** `run`. Nightly report, then
    Post batch. Call out time and round trips.
 3. **Switch (30 s):** move the `;` in `orderdesk.cfg`, save. Right window:
-   `dbr orderdesk`. Three settings rejected, each naming what to remove.
+   `run`. Three settings rejected, each naming what to remove.
 4. **Fix (2 min):** in the Claude session:
 
    > OrderDesk fails on the new SQL Connection driver with the errors in
-   > orderdesk.log. Remove those settings from orderdesk.dbl.
+   > orderdesk.log. Remove those settings from src\orderdesk.dbl.
 
-   Review the diff, then `build` and `dbr orderdesk` in the right window.
+   Review the diff, then `build` and `run` in the right window.
 5. **After (1.5 min), right window:** Nightly report, Post batch, then
    **Reports > Compare runs** with both drivers side by side.
 6. **Close (30 s):** one line plus three retired settings, no DSN, faster
@@ -144,25 +145,36 @@ The show, about 7 minutes:
 | "could not start: connecting" on `VTX12_SQLNATIVE` | **Test Data Source** on `OrderDeskDSN` |
 | "could not start: connecting" on the new line | `Test-NetConnection DESKTOP-NGU3456.mshome.net -Port 1433`; "could not be loaded" means `rssql.dll` is missing |
 | "rejected 3 connection settings" on legacy | Expected only on the new driver; check which line is active |
-| "Counting round trips ... failed" | Rerun `setup.sql` (it grants `VIEW SERVER STATE`) |
-| Compare runs is empty | Run the report or batch first; `reset-demo.ps1` clears runs |
+| "Counting round trips ... failed" | Rerun `sql\setup.sql` (it grants `VIEW SERVER STATE`) |
+| Compare runs is empty | Run the report or batch first; `scripts\reset-demo.ps1` clears runs |
 | Claude session stalls | Check out the fallback commit from step 7, `build`, carry on |
-| Anything else | `reset-demo.ps1`; if still broken, play the recording |
+| Anything else | `scripts\reset-demo.ps1`; if still broken, play the recording |
 
 ## Files
 
-| File | Purpose |
-| --- | --- |
-| `orderdesk.dbl` | UI Toolkit app |
-| `bench.dbl` | Console timed steps |
-| `errors.dbl` | Three failing statements and what the driver reports |
-| `config.inc` | Reads the active line of `orderdesk.cfg`; included by all three |
-| `odstate.inc` | OrderDesk's shared state, included by each of its routines |
-| `theme.inc` | OrderDesk's colour palette entries |
-| `bitmaps\` | Toolbar icons, from the UI Toolkit examples |
-| `build.bat` | Builds all three |
-| `run.bat` | Starts OrderDesk with scale-on-maximize |
-| `orderdesk.cfg.example` | Both connect strings; copy to `orderdesk.cfg` |
-| `setup.sql` | Database, login, grant, data and the `demo_runs` table |
-| `reset.sql` | Deletes demo orders and recorded runs |
-| `reset-demo.ps1` | Warm-up on each driver, `reset.sql`, legacy line active |
+```
+orderdesk-demo\
+  README.md
+  build.bat               compiles src\ into bin\
+  run.bat                 starts OrderDesk with scale-on-maximize
+  orderdesk.cfg.example   both connect strings; copy to orderdesk.cfg
+  src\
+    orderdesk.dbl         UI Toolkit app
+    bench.dbl             console timed steps
+    errors.dbl            three failing statements and what the driver reports
+    config.inc            reads the active line of orderdesk.cfg (all three)
+    odstate.inc           OrderDesk's shared state
+    theme.inc             OrderDesk's colour palette entries
+  sql\
+    setup.sql             database, login, grant, data and demo_runs table
+    reset.sql             deletes demo orders and recorded runs
+  scripts\
+    reset-demo.ps1        warm-up on each driver, reset.sql, legacy line active
+  assets\                 toolbar icons, from the UI Toolkit examples
+  bin\                    build output (gitignored)
+```
+
+Run everything from the repo root: OrderDesk reads `orderdesk.cfg`, writes
+`orderdesk.log` and loads `assets\` from the current folder (`run.bat` and
+`build.bat` switch to it themselves). The `.dbl` files include `ODSRC:*.inc`;
+`build.bat` sets `ODSRC` to `src\`.

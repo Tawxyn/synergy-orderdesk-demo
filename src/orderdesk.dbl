@@ -7,14 +7,14 @@ main orderdesk
 .include "WND:inpctl.def"
 .include "WND:toolbar.def"
 .include "DBLDIR:windows.def"
-.include "theme.inc"
+.include "ODSRC:theme.inc"
 
 .define TB_HEIGHT, 32
 .define TB_INDENT, 4
 .define TB_STEP, 28
 
 global data section odstate, init
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 
 global data section lines, init
@@ -64,7 +64,7 @@ proc
     xcall w_proc(WP_PALET, PAL_FIGURE, 0, 6)
     xcall e_sect("OrderDesk", D_HEADER)
 
-    .include "config.inc"
+    .include "ODSRC:config.inc"
     od_driver = driver
 
     stage = "connecting"
@@ -141,12 +141,12 @@ proc
     ; Toolbar buttons signal the same entries as the menus.
     xcall tb_toolbar(TB_CREATE, tbid, TBC_TOP, , TB_HEIGHT)
     xoff = TB_INDENT
-    xcall add_tool(tbid, xoff, "CUSBROWSE", "bitmaps\open.bmp", "Browse customers")
-    xcall add_tool(tbid, xoff, "ORDNEW", "bitmaps\new.bmp", "New order")
-    xcall add_tool(tbid, xoff, "ORDPOST", "bitmaps\save.bmp", "Post batch (1,000 orders)")
+    xcall add_tool(tbid, xoff, "CUSBROWSE", "assets\open.bmp", "Browse customers")
+    xcall add_tool(tbid, xoff, "ORDNEW", "assets\new.bmp", "New order")
+    xcall add_tool(tbid, xoff, "ORDPOST", "assets\save.bmp", "Post batch (1,000 orders)")
     xoff = xoff + TB_STEP / 2
-    xcall add_tool(tbid, xoff, "RPTNIGHTLY", "bitmaps\print.bmp", "Nightly report (2,000,000 rows)")
-    xcall add_tool(tbid, xoff, "RPTCOMPARE", "bitmaps\preview.bmp", "Compare runs")
+    xcall add_tool(tbid, xoff, "RPTNIGHTLY", "assets\print.bmp", "Nightly report (2,000,000 rows)")
+    xcall add_tool(tbid, xoff, "RPTCOMPARE", "assets\preview.bmp", "Compare runs")
     xcall tb_toolbar(TB_PLACE, tbid)
 
     xcall home_create
@@ -203,7 +203,7 @@ subroutine new_order
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     bldid       ,i4
@@ -325,10 +325,10 @@ subroutine post_batch
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
-.include "theme.inc"
+.include "ODSRC:theme.inc"
 .define BATCH_TICK, 100
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     wid         ,i4
@@ -463,10 +463,10 @@ subroutine nightly_report
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
-.include "theme.inc"
+.include "ODSRC:theme.inc"
 .define REPORT_TICK, 100000
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     wid         ,i4
@@ -602,7 +602,7 @@ subroutine cust_browse
     a_selcol    ,n
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 global data section lines
 record
@@ -650,7 +650,7 @@ subroutine compare_runs
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 global data section lines
 record
@@ -799,7 +799,7 @@ subroutine read_trips
     a_quiet     ,n
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     cur         ,i4
@@ -839,7 +839,7 @@ subroutine record_run
     a_trips     ,n
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     cur         ,i4
@@ -879,7 +879,7 @@ subroutine sql_error
     a_what      ,a
 .include "WND:tools.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     sts         ,i4
@@ -914,7 +914,7 @@ subroutine show_progress
     a_trips     ,n
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
-.include "theme.inc"
+.include "ODSRC:theme.inc"
 .define BAR_WIDTH, 40
 stack record work
     filled      ,i4
@@ -970,7 +970,7 @@ endsubroutine
 subroutine read_connection
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     cur         ,i4
@@ -1010,7 +1010,7 @@ endsubroutine
 ; rssql.dll once the new driver has been bound, otherwise vtxapits.dll.
 subroutine read_library
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     kernel      ,i8
@@ -1038,11 +1038,11 @@ endsubroutine
 subroutine home_create
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
-.include "theme.inc"
+.include "ODSRC:theme.inc"
 .define LOGO_COL, 10
 .define LOGO_WIDTH, 53
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     r           ,i4
@@ -1103,9 +1103,9 @@ subroutine home_refresh
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
-.include "theme.inc"
+.include "ODSRC:theme.inc"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     cur         ,i4
@@ -1244,7 +1244,7 @@ subroutine verdict
     a_text      ,a
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-.include "odstate.inc"
+.include "ODSRC:odstate.inc"
 endglobal
 stack record work
     cur         ,i4
