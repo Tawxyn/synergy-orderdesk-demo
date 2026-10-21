@@ -1,0 +1,4 @@
+; Legacy: Trifox -> ODBC -> DSN
+SQL_CONNECT=VTX12_SQLNATIVE:orderdesk/1234/OrderDeskDSN
+; New: straight to SQL Server
+;SQL_CONNECT=sqlserver:orderdesk/1234/DESKTOP-NGU3456.mshome.net/1433

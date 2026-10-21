@@ -1,0 +1,212 @@
+; OrderDesk bench: the console version of OrderDesk's timed steps. Places an
+; order, runs the nightly report, then posts a batch of orders, timing each
+; step and counting the network round trips it took.
+; Reads its connect string from orderdesk.cfg in the current directory.
+
+.main
+    .include "CONNECTDIR:ssql.def"
+
+.define READ_TICK, 100000
+.define WRITE_ORDERS, 1000
+.define WRITE_TICK, 100
+
+    record
+        dbchn,          d1, 1
+        cur,            i4
+        tcur,           i4
+        sts,            i4
+        len,            i4
+        ix,             i4
+        cfgch,          i4
+        rowcnt,         i4
+        rows,           i4
+        tick,           i4
+        initialized,    i4
+        cust_id,        i4
+        order_no,       i4
+        report_id,      i4
+        amount,         d18.4
+        payload,        a128
+        cust_name,      a40
+        driver,         a40
+        server,         a128
+        database,       a128
+        stage,          a32
+        secs_text,      a16
+        line,           a512
+        connect,        a512
+        sqlp,           a256
+        trips_sql,      a256
+        msg,            a1024
+        start_us,       i8
+        tenths,         i8
+        trips,          i8
+        start_trips,    i8
+    endrecord
+
+.proc
+    xcall flags(7004020, 1)
+    open(1, o, "tt:")
+    sts = %option(48, 1)
+
+    .include "config.inc"
+    writes(1, "Driver   " + %atrim(driver))
+
+    stage = "connecting"
+    if (%ssc_init(dbchn))
+        goto fail
+    initialized = 1
+    if (%ssc_connect(dbchn, connect))
+        goto fail
+
+    stage = "reading server name"
+    sqlp = "SELECT CONVERT(varchar(128),SERVERPROPERTY('ServerName')), DB_NAME()"
+    if (%ssc_open(dbchn, cur, sqlp, SSQL_SELECT))
+        goto fail
+    if (%ssc_define(dbchn, cur, 2, server, database))
+        goto fail
+    sts = %ssc_move(dbchn, cur, 1, rowcnt)
+    if ((sts .ne. SSQL_NORMAL) .or. (rowcnt .ne. 1))
+        goto fail
+    if (%ssc_close(dbchn, cur))
+        goto fail
+    cur = 0
+    writes(1, "Server   " + %atrim(server) + " / " + %atrim(database))
+
+    stage = "placing order"
+    cust_id = 1001
+    sqlp = "SELECT name, (SELECT MAX(order_no) + 1 FROM orders) FROM customers WHERE id = :1"
+    if (%ssc_open(dbchn, cur, sqlp, SSQL_SELECT, SSQL_STANDARD, 1, cust_id))
+        goto fail
+    if (%ssc_define(dbchn, cur, 2, cust_name, order_no))
+        goto fail
+    sts = %ssc_move(dbchn, cur, 1, rowcnt)
+    if ((sts .ne. SSQL_NORMAL) .or. (rowcnt .ne. 1))
+        goto fail
+    if (%ssc_close(dbchn, cur))
+        goto fail
+    cur = 0
+    sqlp = "INSERT INTO orders (order_no, customer_id) VALUES (:1, :2)"
+    if (%ssc_open(dbchn, cur, sqlp, SSQL_NONSEL, SSQL_STANDARD, 2, order_no, cust_id))
+        goto fail
+    if (%ssc_execute(dbchn, cur, SSQL_STANDARD))
+        goto fail
+    if (%ssc_close(dbchn, cur))
+        goto fail
+    cur = 0
+    if (%ssc_commit(dbchn))
+        goto fail
+    writes(1, "Order    " + %string(order_no) + " placed for " + %atrim(cust_name))
+
+    ; Counting reads needs VIEW SERVER STATE, which setup.sql grants.
+    trips_sql = "SELECT CONVERT(bigint,num_reads) FROM sys.dm_exec_connections " +
+&       "WHERE session_id = @@SPID AND parent_connection_id IS NULL"
+
+    stage = "running report"
+    display(1, "Read     ")
+    call start_timer
+    sqlp = "SELECT id, amount, payload FROM report_rows ORDER BY id"
+    if (%ssc_open(dbchn, cur, sqlp, SSQL_SELECT))
+        goto fail
+    if (%ssc_define(dbchn, cur, 3, report_id, amount, payload))
+        goto fail
+    repeat
+    begin
+        sts = %ssc_move(dbchn, cur, 1, rowcnt)
+        if (sts .eq. SSQL_NOMORE)
+            exitloop
+        if (sts .ne. SSQL_NORMAL)
+            goto fail
+        incr rows
+        incr tick
+        if (tick .eq. READ_TICK)
+        begin
+            display(1, ".")
+            clear tick
+        end
+    end
+    if (%ssc_close(dbchn, cur))
+        goto fail
+    cur = 0
+    call stop_timer
+    writes(1, " " + %string(rows, "Z,ZZZ,ZZX") + " rows in " + %atrim(secs_text) +
+&       %string(trips, "ZZZZ,ZZX") + " round trips")
+
+    stage = "posting orders"
+    display(1, "Write    ")
+    call start_timer
+    sqlp = "INSERT INTO orders (order_no, customer_id) VALUES (:1, :2)"
+    if (%ssc_open(dbchn, cur, sqlp, SSQL_NONSEL, SSQL_STANDARD, 2, order_no, cust_id))
+        goto fail
+    for ix from 1 thru WRITE_ORDERS
+    begin
+        incr order_no
+        if (%ssc_execute(dbchn, cur, SSQL_STANDARD))
+            goto fail
+        if (%ssc_commit(dbchn))
+            goto fail
+        incr rows
+        incr tick
+        if (tick .eq. WRITE_TICK)
+        begin
+            display(1, ".")
+            clear tick
+        end
+    end
+    if (%ssc_close(dbchn, cur))
+        goto fail
+    cur = 0
+    call stop_timer
+    writes(1, " " + %string(rows, "Z,ZZX") + " orders in " + %atrim(secs_text) +
+&       %string(trips, "ZZZZ,ZZX") + " round trips")
+
+    if (%ssc_release(dbchn))
+        goto fail
+    stop
+
+start_timer,
+    call read_trips
+    start_trips = trips
+    clear rows
+    clear tick
+    start_us = %datetime_to_i8(%datetime)
+    return
+
+stop_timer,
+    tenths = (%datetime_to_i8(%datetime) - start_us + 50000) / 100000
+    secs_text = %string(tenths / 10) + "." + %string(tenths - tenths / 10 * 10) + "s"
+    call read_trips
+    trips = trips - start_trips
+    return
+
+read_trips,
+    if (%ssc_open(dbchn, tcur, trips_sql, SSQL_SELECT))
+        goto fail
+    if (%ssc_define(dbchn, tcur, 1, trips))
+        goto fail
+    sts = %ssc_move(dbchn, tcur, 1, rowcnt)
+    if ((sts .ne. SSQL_NORMAL) .or. (rowcnt .ne. 1))
+        goto fail
+    if (%ssc_close(dbchn, tcur))
+        goto fail
+    tcur = 0
+    return
+
+fail,
+    msg = ""
+    if (initialized)
+    begin
+        if (%ssc_getemsg(dbchn, msg, len))
+            msg = ""
+    end
+    writes(1, "FAILED   " + %atrim(stage))
+    if (msg)
+        writes(1, "         " + %atrim(msg))
+    if (cur)
+        sts = %ssc_close(dbchn, cur)
+    if (tcur)
+        sts = %ssc_close(dbchn, tcur)
+    if (initialized)
+        sts = %ssc_release(dbchn)
+    stop D_EXIT_FAILURE
+.end

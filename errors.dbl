@@ -1,0 +1,100 @@
+; OrderDesk errors: runs three statements that fail and prints the SQLCODE
+; and message the driver hands back for each.
+; Reads its connect string from orderdesk.cfg in the current directory.
+
+.main
+    .include "CONNECTDIR:ssql.def"
+
+    record
+        dbchn,          d1, 1
+        cur,            i4
+        sts,            i4
+        len,            i4
+        ix,             i4
+        cfgch,          i4
+        rowcnt,         i4
+        initialized,    i4
+        sqlcode,        i4
+        cust_id,        i4
+        order_no,       i4
+        cust_name,      a40
+        driver,         a40
+        title,          a40
+        stage,          a32
+        line,           a512
+        connect,        a512
+        sqlp,           a256
+        msg,            a1024
+    endrecord
+
+.proc
+    xcall flags(7004020, 1)
+    open(1, o, "tt:")
+    sts = %option(48, 1)
+
+    .include "config.inc"
+    writes(1, "Driver   " + %atrim(driver))
+
+    stage = "connecting"
+    if (%ssc_init(dbchn))
+        goto fail
+    initialized = 1
+    if (%ssc_connect(dbchn, connect))
+        goto fail
+
+    title = "Typo in a column name"
+    sqlp = "SELECT nmae FROM customers"
+    if (.not. %ssc_open(dbchn, cur, sqlp, SSQL_SELECT))
+    begin
+        if (.not. %ssc_define(dbchn, cur, 1, cust_name))
+            sts = %ssc_move(dbchn, cur, 1, rowcnt)
+    end
+    call show_error
+
+    title = "Duplicate order number"
+    order_no = 10420
+    cust_id = 1001
+    sqlp = "INSERT INTO orders (order_no, customer_id) VALUES (:1, :2)"
+    if (.not. %ssc_open(dbchn, cur, sqlp, SSQL_NONSEL, SSQL_STANDARD, 2, order_no, cust_id))
+        sts = %ssc_execute(dbchn, cur, SSQL_STANDARD)
+    call show_error
+    sts = %ssc_rollback(dbchn, SSQL_TXOFF)
+
+    title = "Procedure call on a table"
+    sqlp = "{call dbo.orders}"
+    if (.not. %ssc_open(dbchn, cur, sqlp, SSQL_NONSEL))
+        sts = %ssc_execio(dbchn, cur)
+    call show_error
+
+    sts = %ssc_release(dbchn)
+    stop
+
+show_error,
+    msg = ""
+    clear sqlcode
+    sts = %ssc_getemsg(dbchn, msg, len,, sqlcode)
+    writes(1, "")
+    writes(1, %atrim(title))
+    writes(1, "  SQLCODE  " + %string(sqlcode))
+    writes(1, "  " + %atrim(msg))
+    if (cur)
+    begin
+        sts = %ssc_close(dbchn, cur)
+        clear cur
+    end
+    return
+
+fail,
+    msg = ""
+    if (initialized)
+    begin
+        if (%ssc_getemsg(dbchn, msg, len))
+            msg = ""
+    end
+    writes(1, "FAILED   " + %atrim(stage))
+    if (msg)
+        writes(1, "         " + %atrim(msg))
+    if (initialized)
+        sts = %ssc_release(dbchn)
+    stop D_EXIT_FAILURE
+.end
