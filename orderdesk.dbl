@@ -5,11 +5,16 @@ main orderdesk
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 .include "WND:inpctl.def"
+.include "WND:toolbar.def"
+.include "DBLDIR:windows.def"
+.include "theme.inc"
+
+.define TB_HEIGHT, 32
+.define TB_INDENT, 4
+.define TB_STEP, 28
 
 global data section odstate, init
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
 
 global data section lines, init
@@ -23,6 +28,8 @@ record
     colid       ,i4
     inpcol      ,i4
     selcol      ,i4
+    tbid        ,i4
+    xoff        ,i4
     cfgch       ,i4
     logch       ,i4
     cur         ,i4
@@ -32,9 +39,9 @@ record
     rowcnt      ,i4
     initialized ,i4
     problems    ,i4
+    scale       ,d4
+    scale_text  ,a10
     driver      ,a40
-    server      ,a128
-    database    ,a128
     stage       ,a32
     line        ,a512
     connect     ,a512
@@ -44,14 +51,23 @@ record
 proc
     xcall flags(7004020, 1)
     sts = %option(48, 1)
-    xcall u_start(, 1, 1)
+    xcall u_start(, 1)
+    ; Scales the window, its contents and the text; ORDERDESK_SCALE overrides 150%.
+    scale = 150
+    xcall getlog("ORDERDESK_SCALE", scale_text, len)
+    if (len)
+        scale = scale_text(1:len)
+    xcall u_wndfont(D_SETSCALE, scale)
+    xcall w_proc(WP_PALET, PAL_BODY, 0, 7)
+    xcall w_proc(WP_PALET, PAL_HEAD, 0, 3)
+    xcall w_proc(WP_PALET, PAL_LOGO, 0, 2)
+    xcall w_proc(WP_PALET, PAL_FIGURE, 0, 6)
     xcall e_sect("OrderDesk", D_HEADER)
 
     .include "config.inc"
     od_driver = driver
 
     stage = "connecting"
-    xcall e_sect("Connecting with " + %atrim(driver) + "...", D_FOOTER, D_LEFT)
     od_dbchn = 1
     if (%ssc_init(od_dbchn))
         goto fail
@@ -81,7 +97,7 @@ proc
     sqlp = "SELECT CONVERT(varchar(128),SERVERPROPERTY('ServerName')), DB_NAME()"
     if (%ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
         goto fail
-    if (%ssc_define(od_dbchn, cur, 2, server, database))
+    if (%ssc_define(od_dbchn, cur, 2, od_server, od_database))
         goto fail
     sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
     if ((sts .ne. SSQL_NORMAL) .or. (rowcnt .ne. 1))
@@ -89,9 +105,9 @@ proc
     if (%ssc_close(od_dbchn, cur))
         goto fail
     cur = 0
-    xcall e_sect("OrderDesk - " + %atrim(driver) + " - " + %atrim(server) + " / " +
-&       %atrim(database), D_HEADER)
-    xcall e_sect("Connected with " + %atrim(driver), D_FOOTER, D_LEFT)
+    xcall read_connection
+    xcall e_sect("OrderDesk - " + %atrim(driver) + " - " + %atrim(od_server) + " / " +
+&       %atrim(od_database), D_HEADER)
 
     xcall mb_column(mctl, "FILE", "File", , , , , "F")
     xcall mb_entry(mctl, "O_EXIT", "Exit", F4_KEY)
@@ -121,9 +137,22 @@ proc
     xcall mb_end(mctl, selcol)
     xcall m_defcol(0)
 
+    ; Toolbar buttons signal the same entries as the menus.
+    xcall tb_toolbar(TB_CREATE, tbid, TBC_TOP, , TB_HEIGHT)
+    xoff = TB_INDENT
+    xcall add_tool(tbid, xoff, "CUSBROWSE", "bitmaps\open.bmp", "Browse customers")
+    xcall add_tool(tbid, xoff, "ORDNEW", "bitmaps\new.bmp", "New order")
+    xcall add_tool(tbid, xoff, "ORDPOST", "bitmaps\save.bmp", "Post batch (1,000 orders)")
+    xoff = xoff + TB_STEP / 2
+    xcall add_tool(tbid, xoff, "RPTNIGHTLY", "bitmaps\print.bmp", "Nightly report (1,000,000 rows)")
+    xcall add_tool(tbid, xoff, "RPTCOMPARE", "bitmaps\preview.bmp", "Compare runs")
+    xcall tb_toolbar(TB_PLACE, tbid)
+
+    xcall home_create
     repeat
     begin
-        xcall e_sect("Choose a menu entry")
+        xcall home_refresh
+        xcall e_sect("Choose a menu entry or toolbar button")
         xcall m_process
         if (.not. g_select)
             nextloop
@@ -173,11 +202,9 @@ subroutine new_order
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
-record
+stack record work
     bldid       ,i4
     inpid       ,i4
     saved       ,i4
@@ -189,10 +216,11 @@ record
     cust_id     ,i4
     order_no    ,i4
     sqlp        ,a256
-record ordrec
+stack record ordrec
     custno      ,d4
     name        ,a40
 proc
+    init work, ordrec
     xcall e_enter
     entered = 1
     xcall ib_input(bldid, "ORDINP", 3, 60)
@@ -296,40 +324,60 @@ subroutine post_batch
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
-.define BATCH_ORDERS, 1000
+.include "theme.inc"
 .define BATCH_TICK, 100
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
-record
+stack record work
     wid         ,i4
     cur         ,i4
     sts         ,i4
     rowcnt      ,i4
     failed      ,i4
-    posted      ,i4
+    live        ,i4
+    queries     ,i4
+    done        ,i4
+    total       ,i4
     tick        ,i4
     cust_id     ,i4
     order_no    ,i4
     sqlp        ,a256
     secs        ,a16
+    count_text  ,a20
+    trips_text  ,a20
+    verdict     ,a200
     start_us    ,i8
+    elapsed     ,i8
     tenths      ,i8
     trips       ,i8
+    now_trips   ,i8
     start_trips ,i8
+    per_query   ,i8
 proc
-    xcall read_trips(start_trips, failed)
+    init work
+    total = 1000
+    ; Two back-to-back counter reads measure what one read costs, so the
+    ; live readings during the loop can be taken back out of the total.
+    xcall read_trips(start_trips, failed, 0)
     if (failed)
         xreturn
+    xcall read_trips(trips, failed, 0)
+    if (failed)
+        xreturn
+    per_query = trips - start_trips
+    start_trips = trips
+    live = 1
+    clear done, tick, queries
+
     xcall e_enter
-    xcall w_proc(WP_CREATE, wid, "PROGRESS", 3, 40)
+    xcall w_proc(WP_CREATE, wid, "PROGRESS", 6, 48)
     xcall u_logwnd(wid)
     xcall w_brdr(wid, WB_TITLE, "Post batch")
-    xcall u_window(D_PLACE, wid, 8, 20)
-    xcall w_disp(wid, WD_POS, 2, 2, "Posting orders...")
-    xcall u_update
+    xcall w_area(wid, WA_COLOR, PAL_BODY)
+    xcall w_disp(wid, WD_COLOR, PAL_BODY, WD_CLR, WDC_WND)
+    xcall u_window(D_PLACE, wid, 9, 16)
+    xcall show_progress(wid, 0, total, "orders", 0, -1)
 
     start_us = %datetime_to_i8(%datetime)
     sqlp = "SELECT MAX(order_no) FROM orders"
@@ -346,7 +394,7 @@ proc
     sqlp = "INSERT INTO orders (order_no, customer_id) VALUES (:1, :2)"
     if (%ssc_open(od_dbchn, cur, sqlp, SSQL_NONSEL, SSQL_STANDARD, 2, order_no, cust_id))
         goto fail
-    for posted from 1 thru BATCH_ORDERS
+    for done from 1 thru total
     begin
         incr order_no
         if (%ssc_execute(od_dbchn, cur, SSQL_STANDARD))
@@ -355,31 +403,54 @@ proc
             goto fail
         incr tick
         if (tick .eq. BATCH_TICK)
-        begin
-            clear tick
-            xcall w_disp(wid, WD_POS, 2, 2, WD_CLR, WDC_EOL, %string(posted, "Z,ZZX") + " orders")
-            xcall u_update
-        end
+            call progress
     end
-    tenths = (%datetime_to_i8(%datetime) - start_us + 50000) / 100000
+    done = total
     sts = %ssc_close(od_dbchn, cur)
     cur = 0
+    tenths = (%datetime_to_i8(%datetime) - start_us + 50000) / 100000
     xcall u_window(D_DELETE, wid)
     xcall e_exit
 
-    xcall read_trips(trips, failed)
+    xcall read_trips(trips, failed, 0)
     if (failed)
         xreturn
-    trips = trips - start_trips
-    xcall record_run("Write", BATCH_ORDERS, tenths, trips)
+    trips = trips - start_trips - queries * per_query
+    if (trips .lt. 0)
+        trips = 0
+    xcall record_run("Write", done, tenths, trips)
     xcall fmt_secs(tenths, secs)
-    xcall u_message("Posted " + %string(BATCH_ORDERS, "Z,ZZX") + " orders, one transaction each\n\n" +
-&       %atrim(secs) + "\n" + %string(trips, "Z,ZZZ,ZZX") + " round trips")
+    xcall fmt_num(done, count_text)
+    xcall fmt_num(trips, trips_text)
+    xcall verdict("Write", tenths, trips, verdict)
+    if (verdict)
+        verdict = "\n\n" + verdict
+    xcall u_message("Posted " + %atrim(count_text) + " orders, one transaction each" + "\n\n" + %atrim(secs) + "\n" +
+&       %atrim(trips_text) + " round trips" + %atrim(verdict))
     xreturn
+
+progress,
+    clear tick
+    if (live)
+    begin
+        xcall read_trips(now_trips, failed, 1)
+        if (failed) then
+            clear live
+        else
+            incr queries
+    end
+    elapsed = %datetime_to_i8(%datetime) - start_us
+    if (live) then
+        xcall show_progress(wid, done, total, "orders", elapsed,
+&           now_trips - start_trips - queries * per_query)
+    else
+        xcall show_progress(wid, done, total, "orders", elapsed, -1)
+    return
 
 fail,
     xcall u_window(D_DELETE, wid)
     xcall e_exit
+setup_failed,
     xcall sql_error("Post batch")
     if (cur)
         sts = %ssc_close(od_dbchn, cur)
@@ -391,40 +462,70 @@ subroutine nightly_report
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
+.include "theme.inc"
 .define REPORT_TICK, 50000
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
-record
+stack record work
     wid         ,i4
     cur         ,i4
     sts         ,i4
     rowcnt      ,i4
     failed      ,i4
-    rows        ,i4
+    live        ,i4
+    queries     ,i4
+    done        ,i4
+    total       ,i4
     tick        ,i4
     report_id   ,i4
     amount      ,d18.4
     payload     ,a128
     sqlp        ,a256
     secs        ,a16
+    count_text  ,a20
+    trips_text  ,a20
+    verdict     ,a200
     start_us    ,i8
+    elapsed     ,i8
     tenths      ,i8
     trips       ,i8
+    now_trips   ,i8
     start_trips ,i8
+    per_query   ,i8
 proc
-    xcall read_trips(start_trips, failed)
+    init work
+    sqlp = "SELECT COUNT(*) FROM report_rows"
+    if (%ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
+        goto setup_failed
+    if (%ssc_define(od_dbchn, cur, 1, total))
+        goto setup_failed
+    sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
+    if ((sts .ne. SSQL_NORMAL) .or. (rowcnt .ne. 1))
+        goto setup_failed
+    sts = %ssc_close(od_dbchn, cur)
+    cur = 0
+    ; Two back-to-back counter reads measure what one read costs, so the
+    ; live readings during the loop can be taken back out of the total.
+    xcall read_trips(start_trips, failed, 0)
     if (failed)
         xreturn
+    xcall read_trips(trips, failed, 0)
+    if (failed)
+        xreturn
+    per_query = trips - start_trips
+    start_trips = trips
+    live = 1
+    clear done, tick, queries
+
     xcall e_enter
-    xcall w_proc(WP_CREATE, wid, "PROGRESS", 3, 40)
+    xcall w_proc(WP_CREATE, wid, "PROGRESS", 6, 48)
     xcall u_logwnd(wid)
     xcall w_brdr(wid, WB_TITLE, "Nightly report")
-    xcall u_window(D_PLACE, wid, 8, 20)
-    xcall w_disp(wid, WD_POS, 2, 2, "Reading rows...")
-    xcall u_update
+    xcall w_area(wid, WA_COLOR, PAL_BODY)
+    xcall w_disp(wid, WD_COLOR, PAL_BODY, WD_CLR, WDC_WND)
+    xcall u_window(D_PLACE, wid, 9, 16)
+    xcall show_progress(wid, 0, total, "rows", 0, -1)
 
     start_us = %datetime_to_i8(%datetime)
     sqlp = "SELECT id, amount, payload FROM report_rows ORDER BY id"
@@ -439,14 +540,10 @@ proc
             exitloop
         if (sts .ne. SSQL_NORMAL)
             goto fail
-        incr rows
+        incr done
         incr tick
         if (tick .eq. REPORT_TICK)
-        begin
-            clear tick
-            xcall w_disp(wid, WD_POS, 2, 2, WD_CLR, WDC_EOL, %string(rows, "Z,ZZZ,ZZX") + " rows")
-            xcall u_update
-        end
+            call progress
     end
     sts = %ssc_close(od_dbchn, cur)
     cur = 0
@@ -454,22 +551,49 @@ proc
     xcall u_window(D_DELETE, wid)
     xcall e_exit
 
-    xcall read_trips(trips, failed)
+    xcall read_trips(trips, failed, 0)
     if (failed)
         xreturn
-    trips = trips - start_trips
-    xcall record_run("Read", rows, tenths, trips)
+    trips = trips - start_trips - queries * per_query
+    if (trips .lt. 0)
+        trips = 0
+    xcall record_run("Read", done, tenths, trips)
     xcall fmt_secs(tenths, secs)
-    xcall u_message("Nightly report read " + %string(rows, "Z,ZZZ,ZZX") + " rows\n\n" +
-&       %atrim(secs) + "\n" + %string(trips, "Z,ZZZ,ZZX") + " round trips")
+    xcall fmt_num(done, count_text)
+    xcall fmt_num(trips, trips_text)
+    xcall verdict("Read", tenths, trips, verdict)
+    if (verdict)
+        verdict = "\n\n" + verdict
+    xcall u_message("Nightly report read " + %atrim(count_text) + " rows" + "\n\n" + %atrim(secs) + "\n" +
+&       %atrim(trips_text) + " round trips" + %atrim(verdict))
     xreturn
+
+progress,
+    clear tick
+    if (live)
+    begin
+        xcall read_trips(now_trips, failed, 1)
+        if (failed) then
+            clear live
+        else
+            incr queries
+    end
+    elapsed = %datetime_to_i8(%datetime) - start_us
+    if (live) then
+        xcall show_progress(wid, done, total, "rows", elapsed,
+&           now_trips - start_trips - queries * per_query)
+    else
+        xcall show_progress(wid, done, total, "rows", elapsed, -1)
+    return
 
 fail,
     xcall u_window(D_DELETE, wid)
     xcall e_exit
+setup_failed,
     xcall sql_error("Nightly report")
     if (cur)
         sts = %ssc_close(od_dbchn, cur)
+    sts = %ssc_rollback(od_dbchn, SSQL_TXOFF)
     xreturn
 endsubroutine
 
@@ -477,16 +601,14 @@ subroutine cust_browse
     a_selcol    ,n
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
 global data section lines
 record
     ln_count    ,i4
     ln_text     ,[100]a72
 endglobal
-record
+stack record work
     cur         ,i4
     sts         ,i4
     rowcnt      ,i4
@@ -494,6 +616,7 @@ record
     name        ,a40
     sqlp        ,a256
 proc
+    init work
     clear ln_count
     sqlp = "SELECT id, name FROM customers ORDER BY id"
     if (%ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
@@ -526,16 +649,14 @@ subroutine compare_runs
 .include "CONNECTDIR:ssql.def"
 .include "WND:tools.def"
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
 global data section lines
 record
     ln_count    ,i4
     ln_text     ,[100]a72
 endglobal
-record
+stack record work
     cur         ,i4
     sts         ,i4
     rowcnt      ,i4
@@ -545,13 +666,14 @@ record
     driver      ,a40
     step        ,a10
     sqlp        ,a512
-record cmp
+stack record cmp
     c_driver    ,a18
     c_step      ,a7
     c_rows      ,a12
     c_time      ,a9
     c_trips     ,a12
 proc
+    init work, cmp
     clear ln_count
     sqlp = "SELECT driver, step, row_count, tenths, round_trips FROM (" +
 &       "SELECT driver, step, row_count, tenths, round_trips, ROW_NUMBER() OVER " +
@@ -603,15 +725,16 @@ subroutine show_lines
     a_header    ,a
     a_selcol    ,n
 .include "WND:tools.def"
-record
+stack record work
     bldid       ,i4
     lstinp      ,i4
     lstid       ,i4
     clsid       ,i4
     req         ,i4
-record lrec
+stack record lrec
     ltext       ,a72
 proc
+    init work, lrec
     xcall e_enter
     xcall e_sect(a_title)
     xcall l_class(clsid, "LINECLS", , , 12, 1, , , , , , "LINE_LOAD")
@@ -652,9 +775,10 @@ record
     ln_count    ,i4
     ln_text     ,[100]a72
 endglobal
-record lrec
+stack record lrec
     ltext       ,a72
 proc
+    init lrec
     if (a_req .ne. D_LLOADBOT .or. a_itemindex .gt. ln_count)
     begin
         a_req = D_LEOF
@@ -667,22 +791,23 @@ proc
 endsubroutine
 
 ; Returns the session's network read count, which needs VIEW SERVER STATE.
+; With a_quiet set, a failure returns a_failed without showing a message.
 subroutine read_trips
     a_trips     ,n
     a_failed    ,n
+    a_quiet     ,n
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
-record
+stack record work
     cur         ,i4
     sts         ,i4
     rowcnt      ,i4
     trips       ,i8
     sqlp        ,a256
 proc
+    init work
     a_failed = 1
     sqlp = "SELECT CONVERT(bigint,num_reads) FROM sys.dm_exec_connections " +
 &       "WHERE session_id = @@SPID AND parent_connection_id IS NULL"
@@ -699,7 +824,8 @@ proc
     xreturn
 
 fail,
-    xcall sql_error("Counting round trips (does the login have VIEW SERVER STATE?)")
+    if (.not. a_quiet)
+        xcall sql_error("Counting round trips (does the login have VIEW SERVER STATE?)")
     if (cur)
         sts = %ssc_close(od_dbchn, cur)
     xreturn
@@ -712,11 +838,9 @@ subroutine record_run
     a_trips     ,n
 .include "CONNECTDIR:ssql.def"
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
-record
+stack record work
     cur         ,i4
     sts         ,i4
     row_count   ,i4
@@ -725,6 +849,7 @@ record
     step        ,a10
     sqlp        ,a256
 proc
+    init work
     step = a_step
     row_count = a_rows
     tenths = a_tenths
@@ -753,16 +878,15 @@ subroutine sql_error
     a_what      ,a
 .include "WND:tools.def"
 global data section odstate
-record
-    od_dbchn    ,d1
-    od_driver   ,a40
+.include "odstate.inc"
 endglobal
-record
+stack record work
     sts         ,i4
     len         ,i4
     sqlcode     ,i4
     msg         ,a1024
 proc
+    init work
     msg = ""
     clear sqlcode
     sts = %ssc_getemsg(od_dbchn, msg, len,, sqlcode)
@@ -775,5 +899,374 @@ subroutine fmt_secs
     a_text      ,a
 proc
     a_text = %string(a_tenths / 10) + "." + %string(a_tenths - a_tenths / 10 * 10) + "s"
+    xreturn
+endsubroutine
+
+; Draws a progress bar and live figures in a 6 x 48 window. a_elapsed is in
+; microseconds (0 before the first reading); a_trips is -1 when unknown.
+subroutine show_progress
+    a_wid       ,n
+    a_done      ,n
+    a_total     ,n
+    a_unit      ,a
+    a_elapsed   ,n
+    a_trips     ,n
+.include "WND:tools.def"
+.include "DBLDIR:windows.def"
+.include "theme.inc"
+.define BAR_WIDTH, 40
+stack record work
+    filled      ,i4
+    done        ,i8
+    rate        ,i8
+    tenths      ,i8
+    secs        ,a16
+    done_text   ,a20
+    total_text  ,a20
+    rate_text   ,a20
+    trips_text  ,a20
+    stats       ,a80
+    solid       ,a40
+    track       ,a40
+proc
+    init work
+    done = a_done
+    filled = 0
+    if (a_total .gt. 0)
+        filled = done * BAR_WIDTH / a_total
+    if (filled .gt. BAR_WIDTH)
+        filled = BAR_WIDTH
+    track = "........................................"
+    if (filled)
+        xcall w_disp(a_wid, WD_COLOR, PAL_LOGO, WD_POS, 2, 4, WD_ATTR, ATTR_LOAD + ATTR_RVRS,
+&           solid(1:filled), WD_ATTR, ATTR_LOAD)
+    if (filled .lt. BAR_WIDTH)
+        xcall w_disp(a_wid, WD_COLOR, PAL_LOGO, WD_POS, 2, 4 + filled, track(1:BAR_WIDTH - filled))
+    xcall fmt_num(a_done, done_text)
+    xcall fmt_num(a_total, total_text)
+    xcall w_disp(a_wid, WD_COLOR, PAL_BODY, WD_POS, 4, 4, WD_CLR, WDC_EOL,
+&       %atrim(done_text) + " of " + %atrim(total_text) + " " + a_unit)
+    if (a_elapsed .gt. 0)
+    begin
+        tenths = (a_elapsed + 50000) / 100000
+        xcall fmt_secs(tenths, secs)
+        rate = done * 1000000 / a_elapsed
+        xcall fmt_num(rate, rate_text)
+        stats = %atrim(secs) + "   " + %atrim(rate_text) + " " + a_unit + "/s"
+        if (a_trips .ge. 0)
+        begin
+            xcall fmt_num(a_trips, trips_text)
+            stats = %atrim(stats) + "   " + %atrim(trips_text) + " round trips"
+        end
+        xcall w_disp(a_wid, WD_COLOR, PAL_FIGURE, WD_POS, 5, 4, WD_CLR, WDC_EOL, stats)
+    end
+    xcall u_update
+    xreturn
+endsubroutine
+
+; Reads how SQL Server sees this connection, for the home panel.
+subroutine read_connection
+.include "CONNECTDIR:ssql.def"
+global data section odstate
+.include "odstate.inc"
+endglobal
+stack record work
+    cur         ,i4
+    sts         ,i4
+    rowcnt      ,i4
+    sqlp        ,a512
+proc
+    init work
+    sqlp = "SELECT COALESCE(s.client_interface_name, ''), " +
+&       "COALESCE(CONVERT(varchar(10), c.encrypt_option), ''), COALESCE(c.net_transport, '') " +
+&       "FROM sys.dm_exec_sessions s JOIN sys.dm_exec_connections c " +
+&       "ON c.session_id = s.session_id AND c.parent_connection_id IS NULL " +
+&       "WHERE s.session_id = @@SPID"
+    if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
+    begin
+        if (.not. %ssc_define(od_dbchn, cur, 3, od_client, od_encrypt, od_transport))
+            sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
+        sts = %ssc_close(od_dbchn, cur)
+    end
+    xreturn
+endsubroutine
+
+; Creates the home panel behind every other window: the logo and headings.
+subroutine home_create
+.include "WND:tools.def"
+.include "DBLDIR:windows.def"
+.include "theme.inc"
+.define LOGO_COL, 10
+.define LOGO_WIDTH, 53
+global data section odstate
+.include "odstate.inc"
+endglobal
+stack record work
+    r           ,i4
+    col         ,i4
+    start       ,i4
+    row         ,a53
+    blanks      ,a53
+record logo_rows
+    lr1         ,a53, " ###  ####  ####  ##### ####  ####  #####  #### #   #"
+    lr2         ,a53, "#   # #   # #   # #     #   # #   # #     #     #  # "
+    lr3         ,a53, "#   # ####  #   # ####  ####  #   # ####   ###  ###  "
+    lr4         ,a53, "#   # #  #  #   # #     #  #  #   # #         # #  # "
+    lr5         ,a53, " ###  #   # ####  ##### #   # ####  ##### ####  #   #"
+record ,x
+    logo        ,[5]a53
+proc
+    init work
+    xcall w_proc(WP_CREATE, od_homeid, "HOME", 19, 72)
+    xcall u_logwnd(od_homeid)
+    xcall w_brdr(od_homeid, WB_TITLE, "OrderDesk")
+    xcall w_area(od_homeid, WA_COLOR, PAL_BODY)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_CLR, WDC_WND)
+    for r from 1 thru 5
+    begin
+        row = logo[r]
+        col = 1
+        while (col .le. LOGO_WIDTH)
+        begin
+            if (row(col:1) .ne. "#") then
+                incr col
+            else
+            begin
+                start = col
+                repeat
+                begin
+                    incr col
+                    if (col .gt. LOGO_WIDTH)
+                        exitloop
+                    if (row(col:1) .ne. "#")
+                        exitloop
+                end
+                xcall w_disp(od_homeid, WD_COLOR, PAL_LOGO, WD_POS, r + 1, LOGO_COL + start - 1,
+&                   WD_ATTR, ATTR_LOAD + ATTR_RVRS, blanks(1:col - start), WD_ATTR, ATTR_LOAD)
+            end
+        end
+    end
+    xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_POS, 8, LOGO_COL,
+&       "Order entry and nightly reporting on SQL Connection")
+    xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_ATTR, ATTR_LOAD + ATTR_BOLD,
+&       WD_POS, 10, 3, "Connection", WD_POS, 15, 3, "Activity", WD_ATTR, ATTR_LOAD)
+    xcall u_window(D_PLACE, od_homeid, 2, 3)
+    xreturn
+endsubroutine
+
+; Redraws the home panel figures: the connection and the latest runs on this
+; driver. Query failures leave a dash rather than interrupting the user.
+subroutine home_refresh
+.include "CONNECTDIR:ssql.def"
+.include "WND:tools.def"
+.include "DBLDIR:windows.def"
+.include "theme.inc"
+global data section odstate
+.include "odstate.inc"
+endglobal
+stack record work
+    cur         ,i4
+    sts         ,i4
+    rowcnt      ,i4
+    customers   ,i4
+    orders      ,i4
+    row_count   ,i4
+    tenths      ,i4
+    trips       ,i8
+    step        ,a10
+    secs        ,a16
+    num1        ,a20
+    num2        ,a20
+    client      ,a60
+    counts      ,a60
+    read_text   ,a60
+    write_text  ,a60
+    run_text    ,a60
+    sqlp        ,a512
+proc
+    init work
+    counts = "-"
+    sqlp = "SELECT (SELECT COUNT(*) FROM customers), (SELECT COUNT(*) FROM orders)"
+    if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
+    begin
+        if (.not. %ssc_define(od_dbchn, cur, 2, customers, orders))
+        begin
+            sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
+            if ((sts .eq. SSQL_NORMAL) .and. (rowcnt .eq. 1))
+            begin
+                xcall fmt_num(customers, num1)
+                xcall fmt_num(orders, num2)
+                counts = %atrim(num1) + " customers, " + %atrim(num2) + " orders"
+            end
+        end
+        sts = %ssc_close(od_dbchn, cur)
+    end
+
+    read_text = "-"
+    write_text = "-"
+    sqlp = "SELECT step, row_count, tenths, round_trips FROM (SELECT step, row_count, tenths, " +
+&       "round_trips, ROW_NUMBER() OVER (PARTITION BY step ORDER BY id DESC) AS rn " +
+&       "FROM demo_runs WHERE driver = :1) r WHERE rn = 1"
+    if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT, SSQL_STANDARD, 1, od_driver))
+    begin
+        if (.not. %ssc_define(od_dbchn, cur, 4, step, row_count, tenths, trips))
+        begin
+            while (%ssc_move(od_dbchn, cur, 1, rowcnt) .eq. SSQL_NORMAL)
+            begin
+                xcall fmt_secs(tenths, secs)
+                xcall fmt_num(row_count, num1)
+                xcall fmt_num(trips, num2)
+                run_text = %atrim(num1) + " in " + %atrim(secs) + ", " + %atrim(num2) + " round trips"
+                if (step .eqs. "Read") then
+                    read_text = run_text
+                else
+                    write_text = run_text
+            end
+        end
+        sts = %ssc_close(od_dbchn, cur)
+    end
+
+    client = "(not reported)"
+    if (od_client)
+        client = %atrim(od_client) + ", " + %atrim(od_transport) + ", encrypted " + od_encrypt
+
+    call draw_figures
+    xreturn
+
+draw_figures,
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 11, 5, WD_CLR, WDC_EOL, "Driver      ",
+&       WD_COLOR, PAL_FIGURE, od_driver)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 12, 5, WD_CLR, WDC_EOL, "Server      ",
+&       WD_COLOR, PAL_FIGURE, %atrim(od_server) + " / " + od_database)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 13, 5, WD_CLR, WDC_EOL, "Client      ",
+&       WD_COLOR, PAL_FIGURE, client)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 16, 5, WD_CLR, WDC_EOL, "Data        ",
+&       WD_COLOR, PAL_FIGURE, counts)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 17, 5, WD_CLR, WDC_EOL, "Last read   ",
+&       WD_COLOR, PAL_FIGURE, read_text)
+    xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_POS, 18, 5, WD_CLR, WDC_EOL, "Last write  ",
+&       WD_COLOR, PAL_FIGURE, write_text)
+    return
+endsubroutine
+
+subroutine add_tool
+    a_tbid      ,n
+    a_xoff      ,n
+    a_name      ,a
+    a_bitmap    ,a
+    a_tip       ,a
+.include "WND:tools.def"
+.include "WND:toolbar.def"
+.define TB_INDENT, 4
+.define TB_SIZE, 24
+.define TB_STEP, 28
+proc
+    xcall tb_button(a_tbid, TBB_LOAD, a_name, a_xoff, TB_INDENT, TB_SIZE, TB_SIZE,
+&       TBLOAD_TYPE_BMAP, a_bitmap, a_tip, , , "toolbar_method")
+    a_xoff = a_xoff + TB_STEP
+    xreturn
+endsubroutine
+
+.subroutine toolbar_method ,reentrant
+a_btnname   ,a
+.proc
+    xcall m_signal(a_btnname)
+    xreturn
+.end
+
+; Builds the comparison against the other driver's latest run of the same step,
+; such as "2.4x faster than VTX12_SQLNATIVE". Empty when there is none yet.
+subroutine verdict
+    a_step      ,a
+    a_tenths    ,n
+    a_trips     ,n
+    a_text      ,a
+.include "CONNECTDIR:ssql.def"
+global data section odstate
+.include "odstate.inc"
+endglobal
+stack record work
+    cur         ,i4
+    sts         ,i4
+    rowcnt      ,i4
+    other_tenths,i4
+    other_trips ,i8
+    mine_tenths ,i8
+    mine_trips  ,i8
+    ratio       ,i8
+    step        ,a10
+    other       ,a40
+    speed       ,a100
+    trips       ,a100
+    sqlp        ,a256
+proc
+    init work
+    a_text = ""
+    step = a_step
+    mine_tenths = a_tenths
+    mine_trips = a_trips
+    sqlp = "SELECT TOP 1 driver, tenths, round_trips FROM demo_runs " +
+&       "WHERE step = :1 AND driver <> :2 ORDER BY id DESC"
+    if (%ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT, SSQL_STANDARD, 2, step, od_driver))
+        goto done
+    if (%ssc_define(od_dbchn, cur, 3, other, other_tenths, other_trips))
+        goto done
+    sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
+    if ((sts .ne. SSQL_NORMAL) .or. (rowcnt .ne. 1))
+        goto done
+    if ((mine_tenths .le. 0) .or. (other_tenths .le. 0))
+        goto done
+
+    ratio = (other_tenths * 10 + mine_tenths / 2) / mine_tenths
+    if (ratio .ge. 11) then
+        speed = %string(ratio / 10) + "." + %string(ratio - ratio / 10 * 10) + "x faster than " +
+&           %atrim(other)
+    else if (ratio .le. 9) then
+    begin
+        ratio = (mine_tenths * 10 + other_tenths / 2) / other_tenths
+        speed = %string(ratio / 10) + "." + %string(ratio - ratio / 10 * 10) + "x slower than " +
+&           %atrim(other)
+    end
+    else
+        speed = "About the same speed as " + %atrim(other)
+
+    trips = ""
+    if ((mine_trips .gt. 0) .and. (other_trips .gt. 0))
+    begin
+        ratio = (other_trips * 10 + mine_trips / 2) / mine_trips
+        if (ratio .ge. 11) then
+            trips = %string(ratio / 10) + "." + %string(ratio - ratio / 10 * 10) + "x fewer round trips"
+        else if (ratio .le. 9) then
+        begin
+            ratio = (mine_trips * 10 + other_trips / 2) / other_trips
+            trips = %string(ratio / 10) + "." + %string(ratio - ratio / 10 * 10) + "x more round trips"
+        end
+        else
+            trips = "About the same round trips"
+    end
+    a_text = speed
+    if (trips)
+        a_text = %atrim(speed) + "\n" + trips
+
+done,
+    if (cur)
+        sts = %ssc_close(od_dbchn, cur)
+    xreturn
+endsubroutine
+
+; Formats a whole number with thousands separators and no leading blanks.
+subroutine fmt_num
+    a_value     ,n
+    a_text      ,a
+stack record work
+    buf         ,a15
+    ix          ,i4
+proc
+    init work
+    buf = %string(a_value, "ZZZ,ZZZ,ZZZ,ZZX")
+    for ix from 1 thru 15
+        if (buf(ix:1) .ne. " ")
+            exitloop
+    a_text = buf(ix, 15)
     xreturn
 endsubroutine

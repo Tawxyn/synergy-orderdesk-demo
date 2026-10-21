@@ -100,8 +100,10 @@ programs with `dbs`.
 14. Run the show three times; write down both drivers' numbers each time.
     Present your Windows ratios, not the Linux ones.
 15. Rehearse the Claude segment with the exact prompt below, and time it.
-16. Check the app is readable from the back row with two windows side by side
-    (Windows display scaling 150-200%).
+16. Check the app is readable from the back row with two windows side by side.
+    OrderDesk scales itself to 150%; `set ORDERDESK_SCALE=175` (or any
+    percentage) before `dbr orderdesk` to change it. Menus, toolbar and message
+    boxes follow Windows display scaling instead.
 17. Turn Wi-Fi off and run everything except the Claude segment. Claude needs
     the internet: use a phone hotspot for that segment only.
 18. Record one clean run as a fallback video.
@@ -153,6 +155,9 @@ The show, about 7 minutes:
 | `bench.dbl` | Console timed steps |
 | `errors.dbl` | Three failing statements and what the driver reports |
 | `config.inc` | Reads the active line of `orderdesk.cfg`; included by all three |
+| `odstate.inc` | OrderDesk's shared state, included by each of its routines |
+| `theme.inc` | OrderDesk's colour palette entries |
+| `bitmaps\` | Toolbar icons, from the UI Toolkit examples |
 | `build.bat` | Builds all three |
 | `orderdesk.cfg.example` | Both connect strings; copy to `orderdesk.cfg` |
 | `setup.sql` | Database, login, grant, data and the `demo_runs` table |
