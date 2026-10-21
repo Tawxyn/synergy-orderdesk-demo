@@ -40,6 +40,7 @@ record
     scale       ,d4
     scale_text  ,a10
     driver      ,a40
+    token       ,a40
     stage       ,a32
     line        ,a512
     connect     ,a512
@@ -73,6 +74,21 @@ proc
     initialized = 1
     if (%ssc_connect(od_dbchn, connect))
         goto fail
+
+    ; ODBC-era connection settings. The new driver rejects them, so they apply
+    ; only to the legacy VTX12_SQLNATIVE driver.
+    token = driver
+    upcase token
+    if (token .eqs. "VTX12_SQLNATIVE")
+    begin
+        stage = "applying connection settings"
+        if (%ssc_cmd(od_dbchn, , SSQL_CMD_SSL, "3;SSL=yes;SSL_PROTOCOL=1.2"))
+            goto fail
+        if (%ssc_cmd(od_dbchn, , SSQL_PERFORMANCE_SQL, "yes"))
+            goto fail
+        if (%ssc_cmd(od_dbchn, , SSQL_CMD_NOUNICHAR, "no"))
+            goto fail
+    end
 
     stage = "reading server name"
     sqlp = "SELECT CONVERT(varchar(128),SERVERPROPERTY('ServerName')), DB_NAME()"
