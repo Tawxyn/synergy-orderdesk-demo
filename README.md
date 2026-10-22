@@ -4,7 +4,10 @@ Demo for the DevPartner 2026 session "Rebuilding SQL Connection from the Ground 
 
 - `src\orderdesk.dbl` is a UI Toolkit order-entry app: browse customers, place an
   order, post a batch of 50,000 orders, run a 2,000,000-row nightly report, and
-  compare the timed runs of both drivers.
+  compare the timed runs of both drivers. At startup it applies three
+  connection settings from the ODBC era that the new driver no longer accepts.
+- `src\speedgraph.dbl` draws the live speed graph in OrderDesk's progress
+  window.
 - `src\bench.dbl` is the console version of the timed steps.
 - `src\errors.dbl` runs three failing statements and prints what the driver
   reports.
@@ -14,8 +17,10 @@ in `orderdesk.cfg`.
 
 What the demo shows:
 
-- **Drop-in.** The same `.dbr` runs on both drivers after a one-line config
-  change.
+- **Drop-in, mostly.** The same `.dbr` runs on both drivers after a one-line
+  config change, unless the app uses settings the new driver retired. The
+  driver names each one ("... is not supported; remove this option"), and
+  removing them is a small edit.
 - **No DSN, no ODBC.** The new connect string names the server directly.
 - **Reads.** Each timed run reports its time and the network round trips
   SQL Server counted for the session.
@@ -61,8 +66,8 @@ password you choose for the demo login.
    with `<password>` and `your-sql-server` with `<server>`. `orderdesk.cfg` is
    gitignored.
 5. In a Synergy/DE x64 command prompt, in this folder: `build`. It compiles
-   `src\` into `bin\`: `orderdesk` (linked with `WND:tklib.elb`), `bench` and
-   `errors`.
+   `src\` into `bin\`: `orderdesk` (linked with `speedgraph` and
+   `WND:tklib.elb`), `bench` and `errors`.
 
 ## 4. Run
 
@@ -77,7 +82,10 @@ percentage to change it.
    order**.
 7. In `orderdesk.cfg`, put a `;` in front of the `VTX12_SQLNATIVE` line and
    remove it from the other `SQL_CONNECT` line. Save.
-8. `run` again. Run the report and the batch, then **Reports > Compare runs**.
+8. `run` again. It stops with "rejected 3 connection settings"; the messages
+   are also in `orderdesk.log`. Remove the three `%ssc_cmd` calls after the
+   `; ODBC-era connection settings` comment in `src\orderdesk.dbl`, `build`,
+   and `run`. Run the report and the batch, then **Reports > Compare runs**.
 9. **File > Start fresh** deletes the recorded runs and demo orders, so the
    scoreboard and Compare runs start empty.
    `powershell -ExecutionPolicy Bypass -File scripts\reset-demo.ps1` does the
@@ -91,6 +99,7 @@ percentage to change it.
 | "could not start: reading orderdesk.cfg" | Run from this folder; `orderdesk.cfg` needs one active `SQL_CONNECT=` line |
 | "could not start: connecting" on `VTX12_SQLNATIVE` | **Test Data Source** on `OrderDeskDSN` |
 | "could not start: connecting" on the new line | `Test-NetConnection <server> -Port 1433`; "could not be loaded" means the new driver's library is missing |
+| "rejected 3 connection settings" on `VTX12_SQLNATIVE` | Expected only on the new driver; check which line is active |
 | "Counting round trips ... failed" | Rerun `sql\setup.sql` (it grants `VIEW SERVER STATE`) |
 | Compare runs is empty | Run the report or batch first |
 
@@ -104,6 +113,8 @@ orderdesk-demo\
   orderdesk.cfg.example   both connect strings; copy to orderdesk.cfg
   src\
     orderdesk.dbl         UI Toolkit app
+    speedgraph.dbl        live speed graph, linked into orderdesk
+    speedgraph.inc        the graph's shared state
     bench.dbl             console timed steps
     errors.dbl            three failing statements and what the driver reports
     config.inc            reads the active line of orderdesk.cfg (all three)

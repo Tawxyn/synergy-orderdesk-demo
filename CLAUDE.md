@@ -16,7 +16,7 @@ Run from the repo root in a Synergy/DE x64 command prompt. There are no tests
 or linters; a clean compile and link is the check.
 
 - `build` (`build.bat`): compiles `src\` into `bin\` and links `orderdesk` with
-  `WND:tklib.elb`. It sets the `ODSRC` logical to `src\`, which every
+  `bin\speedgraph` (compiled separately) and `WND:tklib.elb`. It sets the `ODSRC` logical to `src\`, which every
   `.include "ODSRC:*.inc"` relies on; set `ODSRC` yourself if you call
   `dbl`/`dblink` directly (`dbl -o bin\<name> src\<name>`, then
   `dblink -o bin\<name>.dbr bin\<name> [WND:tklib.elb]`).
@@ -60,7 +60,13 @@ count network round trips with `sys.dm_exec_connections.num_reads` for the
 session, which needs `VIEW SERVER STATE` (granted in `setup.sql`). OrderDesk
 reads the counter twice before timing to measure one reading's cost
 (`per_query`), shows live readings during the loop, and subtracts
-`queries * per_query` from the total. Each run is inserted into `demo_runs`;
+`queries * per_query` from the total. The progress window also hosts the speed graph from `speedgraph.dbl`, a separately
+compiled unit with its own `graph` global data section (`speedgraph.inc`):
+`graph_start` sizes it and returns how many columns fit, the caller samples
+every `total / columns` rows, and `graph_add` appends each interval's speed.
+The initial scale is `best_rate` (fastest recorded run of that step, either
+driver, plus a quarter), so both drivers draw on the same scale; a faster
+sample raises it and redraws. Each run is inserted into `demo_runs`;
 `verdict`, the home scoreboard and Reports > Compare runs all read the latest
 row per driver and step, so two app windows on different drivers see each
 other's results. File > Start fresh and `sql\reset.sql` clear `demo_runs` and
@@ -69,8 +75,10 @@ orders above seed order 10420.
 **Colours.** `theme.inc` names palette entries 11-15, set with `WP_PALET` at
 startup (Toolkit uses the lower entries). `accent_for` maps the driver token to
 the legacy (amber) or new (green) accent. The three `%ssc_cmd` settings in
-`main` apply only to `VTX12_SQLNATIVE`, because the new driver rejects them
-with "... is not supported; remove this option".
+`main` are deliberate: the legacy driver accepts them and the new driver
+rejects each with "... is not supported; remove this option", which is the
+demo's migration step. `main` collects all failures, shows them together,
+writes them to `orderdesk.log`, and exits.
 
 ## Traditional DBL pitfalls hit in this code
 

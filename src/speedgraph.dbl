@@ -1,0 +1,153 @@
+; Speed graph: a column chart drawn in character cells in a window. Each
+; graph_add call appends one column whose height is that sample's value
+; against the scale. A value above the scale raises the scale by a quarter and
+; redraws every column. Callers refresh the screen themselves (U_UPDATE).
+;
+; Layout from the top-left corner passed to graph_start: the unit on the first
+; row, then the plot rows with value labels and a vertical axis on the left,
+; then the horizontal axis.
+
+.define LABEL_WIDTH, 7
+
+; Sets up the graph in window a_wid and draws its frame. a_scale is the
+; full-scale value, or 0 to take it from the first sample. a_columns returns
+; how many samples fit across.
+subroutine graph_start
+    a_wid       ,n
+    a_row       ,n
+    a_col       ,n
+    a_height    ,n
+    a_width     ,n
+    a_scale     ,n
+    a_palette   ,n
+    a_unit      ,a
+    a_columns   ,n
+.include "DBLDIR:windows.def"
+global data section graph, init
+.include "ODSRC:speedgraph.inc"
+endglobal
+proc
+    gr_wid = a_wid
+    gr_top = a_row + 1
+    gr_left = a_col + LABEL_WIDTH
+    gr_height = a_height
+    gr_width = a_width - LABEL_WIDTH
+    if (gr_width .gt. GRAPH_MAX_COLUMNS)
+        gr_width = GRAPH_MAX_COLUMNS
+    gr_palette = a_palette
+    gr_scale = a_scale
+    gr_count = 0
+    a_columns = gr_width
+    xcall w_disp(gr_wid, WD_POS, a_row, a_col, a_unit)
+    xcall graph_frame
+    xreturn
+endsubroutine
+
+; Appends one sample. Samples past the last column are ignored.
+subroutine graph_add
+    a_value     ,n
+global data section graph
+.include "ODSRC:speedgraph.inc"
+endglobal
+stack record work
+    col         ,i4
+proc
+    init work
+    if (gr_count .ge. gr_width)
+        xreturn
+    incr gr_count
+    gr_values[gr_count] = a_value
+    if (a_value .le. gr_scale)
+    begin
+        xcall graph_column(gr_count)
+        xreturn
+    end
+    gr_scale = a_value + a_value / 4
+    xcall graph_frame
+    for col from 1 thru gr_count
+        xcall graph_column(col)
+    xreturn
+endsubroutine
+
+; Draws the axes and the scale labels at the top, middle and bottom.
+subroutine graph_frame
+.include "DBLDIR:windows.def"
+global data section graph
+.include "ODSRC:speedgraph.inc"
+endglobal
+stack record work
+    r           ,i4
+    label       ,a5
+    axis        ,a200
+proc
+    init work
+    for r from gr_top thru gr_top + gr_height - 1
+        xcall w_disp(gr_wid, WD_ATTR, ATTR_LOAD, WD_POS, r, gr_left - LABEL_WIDTH, "      |")
+    for r from 1 thru gr_width
+        axis(r:1) = "-"
+    xcall w_disp(gr_wid, WD_POS, gr_top + gr_height, gr_left - LABEL_WIDTH, "    0 +",
+&       axis(1:gr_width))
+    if (gr_scale .gt. 0)
+    begin
+        xcall graph_label(gr_scale, label)
+        xcall w_disp(gr_wid, WD_POS, gr_top, gr_left - LABEL_WIDTH, label)
+        xcall graph_label(gr_scale / 2, label)
+        xcall w_disp(gr_wid, WD_POS, gr_top + gr_height / 2, gr_left - LABEL_WIDTH, label)
+    end
+    xreturn
+endsubroutine
+
+; Draws column a_col from the bottom up: solid cells up to its height, blank
+; above. A nonzero value always shows at least one cell.
+subroutine graph_column
+    a_col       ,n
+.include "DBLDIR:windows.def"
+global data section graph
+.include "ODSRC:speedgraph.inc"
+endglobal
+stack record work
+    filled      ,i8
+    r           ,i4
+    row         ,i4
+    col         ,i4
+proc
+    init work
+    col = gr_left + a_col - 1
+    if (gr_scale .gt. 0)
+        filled = (gr_values[a_col] * gr_height + gr_scale / 2) / gr_scale
+    if ((filled .lt. 1) .and. (gr_values[a_col] .gt. 0))
+        filled = 1
+    if (filled .gt. gr_height)
+        filled = gr_height
+    for r from 1 thru gr_height
+    begin
+        row = gr_top + gr_height - r
+        if (r .le. filled) then
+            xcall w_disp(gr_wid, WD_COLOR, gr_palette, WD_POS, row, col,
+&               WD_ATTR, ATTR_LOAD + ATTR_RVRS, " ", WD_ATTR, ATTR_LOAD)
+        else
+            xcall w_disp(gr_wid, WD_POS, row, col, " ")
+    end
+    xreturn
+endsubroutine
+
+; Formats an axis value in five characters, right-aligned: 950, 312k, 1.2M.
+subroutine graph_label
+    a_value     ,n
+    a_text      ,a
+stack record work
+    value       ,i8
+    text        ,a8
+proc
+    init work
+    value = a_value
+    if (value .ge. 1000000) then
+        text = %string(value / 1000000) + "." + %string(value / 100000 - value / 1000000 * 10) + "M"
+    else if (value .ge. 1000) then
+        text = %string(value / 1000) + "k"
+    else
+        text = %string(value)
+    a_text = "     "
+    a_text(6 - %trim(text):%trim(text)) = text
+    xreturn
+endsubroutine

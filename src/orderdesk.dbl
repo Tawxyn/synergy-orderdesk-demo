@@ -40,7 +40,9 @@ record
     scale       ,d4
     scale_text  ,a10
     driver      ,a40
-    token       ,a40
+    logch       ,i4
+    problems    ,i4
+    rejected    ,a2048
     stage       ,a32
     line        ,a512
     connect     ,a512
@@ -75,19 +77,23 @@ proc
     if (%ssc_connect(od_dbchn, connect))
         goto fail
 
-    ; ODBC-era connection settings. The new driver rejects them, so they apply
-    ; only to the legacy VTX12_SQLNATIVE driver.
-    token = driver
-    upcase token
-    if (token .eqs. "VTX12_SQLNATIVE")
+    ; ODBC-era connection settings. The legacy driver accepts them; the new
+    ; driver rejects each one with "... is not supported; remove this option".
+    logch = 0
+    open(logch, o, "orderdesk.log")
+    if (%ssc_cmd(od_dbchn, , SSQL_CMD_SSL, "3;SSL=yes;SSL_PROTOCOL=1.2"))
+        call setting_failed
+    if (%ssc_cmd(od_dbchn, , SSQL_PERFORMANCE_SQL, "yes"))
+        call setting_failed
+    if (%ssc_cmd(od_dbchn, , SSQL_CMD_NOUNICHAR, "no"))
+        call setting_failed
+    close logch
+    if (problems)
     begin
-        stage = "applying connection settings"
-        if (%ssc_cmd(od_dbchn, , SSQL_CMD_SSL, "3;SSL=yes;SSL_PROTOCOL=1.2"))
-            goto fail
-        if (%ssc_cmd(od_dbchn, , SSQL_PERFORMANCE_SQL, "yes"))
-            goto fail
-        if (%ssc_cmd(od_dbchn, , SSQL_CMD_NOUNICHAR, "no"))
-            goto fail
+        xcall u_message("The " + %atrim(driver) + " driver rejected " + %string(problems) +
+&           " connection settings:\n" + %atrim(rejected) + "\n\nDetails are in orderdesk.log.",
+&           , D_ERROR)
+        goto shutdown
     end
 
     stage = "reading server name"
@@ -172,6 +178,18 @@ shutdown,
         sts = %ssc_release(od_dbchn)
     xcall u_finish
     stop
+
+setting_failed,
+    msg = ""
+    if (%ssc_getemsg(od_dbchn, msg, len))
+        msg = "unknown error"
+    incr problems
+    if (problems .eq. 1) then
+        rejected = %atrim(msg)
+    else
+        rejected = %atrim(rejected) + "\n" + %atrim(msg)
+    writes(logch, %atrim(msg))
+    return
 
 fail,
     msg = ""
@@ -315,7 +333,6 @@ subroutine post_batch
 .include "ODSRC:theme.inc"
 .define BATCH_ORDERS, 50000
 .define BATCH_COMMIT, 1000
-.define BATCH_TICK, 2500
 global data section odstate
 .include "ODSRC:odstate.inc"
 endglobal
@@ -345,6 +362,12 @@ stack record work
     now_trips   ,i8
     start_trips ,i8
     per_query   ,i8
+    sample_every,i4
+    columns     ,i4
+    last_done   ,i4
+    scale       ,i8
+    rate        ,i8
+    last_us     ,i8
 proc
     init work
     total = BATCH_ORDERS
@@ -362,15 +385,20 @@ proc
     clear done, tick, queries
 
     xcall e_enter
-    xcall w_proc(WP_CREATE, wid, "PROGRESS", 6, 48)
+    xcall w_proc(WP_CREATE, wid, "PROGRESS", 22, 78)
     xcall u_logwnd(wid)
     xcall w_brdr(wid, WB_TITLE, "Post batch")
     xcall w_area(wid, WA_COLOR, PAL_BODY)
     xcall w_disp(wid, WD_COLOR, PAL_BODY, WD_CLR, WDC_WND)
-    xcall u_window(D_PLACE, wid, 9, 16)
+    xcall u_window(D_PLACE, wid, 2, 2)
     xcall show_progress(wid, 0, total, "orders", 0, -1)
+    ; One graph column per sample, on the scale of the fastest Write recorded.
+    xcall best_rate("Write", scale)
+    xcall graph_start(wid, 7, 3, 13, 74, scale, od_accent, "orders/s", columns)
+    sample_every = (total + columns - 1) / columns
 
     start_us = %datetime_to_i8(%datetime)
+    last_us = start_us
     sqlp = "SELECT MAX(order_no) FROM orders"
     if (%ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
         goto fail
@@ -398,7 +426,7 @@ proc
             clear pending
         end
         incr tick
-        if (tick .eq. BATCH_TICK)
+        if (tick .eq. sample_every)
             call progress
     end
     if (pending)
@@ -441,6 +469,14 @@ progress,
             incr queries
     end
     elapsed = %datetime_to_i8(%datetime) - start_us
+    if (start_us + elapsed .gt. last_us)
+    begin
+        rate = done - last_done
+        rate = rate * 1000000 / (start_us + elapsed - last_us)
+        xcall graph_add(rate)
+    end
+    last_done = done
+    last_us = start_us + elapsed
     if (live) then
         xcall show_progress(wid, done, total, "orders", elapsed,
 &           now_trips - start_trips - queries * per_query)
@@ -464,7 +500,6 @@ subroutine nightly_report
 .include "WND:tools.def"
 .include "DBLDIR:windows.def"
 .include "ODSRC:theme.inc"
-.define REPORT_TICK, 100000
 global data section odstate
 .include "ODSRC:odstate.inc"
 endglobal
@@ -494,6 +529,12 @@ stack record work
     now_trips   ,i8
     start_trips ,i8
     per_query   ,i8
+    sample_every,i4
+    columns     ,i4
+    last_done   ,i4
+    scale       ,i8
+    rate        ,i8
+    last_us     ,i8
 proc
     init work
     sqlp = "SELECT COUNT(*) FROM report_rows"
@@ -520,15 +561,20 @@ proc
     clear done, tick, queries
 
     xcall e_enter
-    xcall w_proc(WP_CREATE, wid, "PROGRESS", 6, 48)
+    xcall w_proc(WP_CREATE, wid, "PROGRESS", 22, 78)
     xcall u_logwnd(wid)
     xcall w_brdr(wid, WB_TITLE, "Nightly report")
     xcall w_area(wid, WA_COLOR, PAL_BODY)
     xcall w_disp(wid, WD_COLOR, PAL_BODY, WD_CLR, WDC_WND)
-    xcall u_window(D_PLACE, wid, 9, 16)
+    xcall u_window(D_PLACE, wid, 2, 2)
     xcall show_progress(wid, 0, total, "rows", 0, -1)
+    ; One graph column per sample, on the scale of the fastest Read recorded.
+    xcall best_rate("Read", scale)
+    xcall graph_start(wid, 7, 3, 13, 74, scale, od_accent, "rows/s", columns)
+    sample_every = (total + columns - 1) / columns
 
     start_us = %datetime_to_i8(%datetime)
+    last_us = start_us
     sqlp = "SELECT id, amount, payload FROM report_rows ORDER BY id"
     if (%ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT))
         goto fail
@@ -543,7 +589,7 @@ proc
             goto fail
         incr done
         incr tick
-        if (tick .eq. REPORT_TICK)
+        if (tick .eq. sample_every)
             call progress
     end
     sts = %ssc_close(od_dbchn, cur)
@@ -580,6 +626,14 @@ progress,
             incr queries
     end
     elapsed = %datetime_to_i8(%datetime) - start_us
+    if (start_us + elapsed .gt. last_us)
+    begin
+        rate = done - last_done
+        rate = rate * 1000000 / (start_us + elapsed - last_us)
+        xcall graph_add(rate)
+    end
+    last_done = done
+    last_us = start_us + elapsed
     if (live) then
         xcall show_progress(wid, done, total, "rows", elapsed,
 &           now_trips - start_trips - queries * per_query)
@@ -1462,5 +1516,40 @@ proc
         a_palette = PAL_NEW
     else
         a_palette = PAL_LEGACY
+    xreturn
+endsubroutine
+
+; Returns the fastest average speed (rows or orders per second) recorded for
+; a step by either driver, or 0 when there is none. Used as the graph scale.
+subroutine best_rate
+    a_step      ,a
+    a_rate      ,n
+.include "CONNECTDIR:ssql.def"
+global data section odstate
+.include "ODSRC:odstate.inc"
+endglobal
+stack record work
+    cur         ,i4
+    sts         ,i4
+    rowcnt      ,i4
+    rate        ,i8
+    step        ,a10
+    sqlp        ,a256
+proc
+    init work
+    a_rate = 0
+    step = a_step
+    sqlp = "SELECT COALESCE(MAX(CAST(row_count AS bigint) * 10 / NULLIF(tenths, 0)), 0) " +
+&       "FROM demo_runs WHERE step = :1"
+    if (.not. %ssc_open(od_dbchn, cur, sqlp, SSQL_SELECT, SSQL_STANDARD, 1, step))
+    begin
+        if (.not. %ssc_define(od_dbchn, cur, 1, rate))
+        begin
+            sts = %ssc_move(od_dbchn, cur, 1, rowcnt)
+            if ((sts .eq. SSQL_NORMAL) .and. (rowcnt .eq. 1))
+                a_rate = rate + rate / 4
+        end
+        sts = %ssc_close(od_dbchn, cur)
+    end
     xreturn
 endsubroutine
