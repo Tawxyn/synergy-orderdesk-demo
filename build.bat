@@ -4,6 +4,7 @@ setlocal
 cd /d "%~dp0"
 set ODSRC=%~dp0src\
 if not exist bin mkdir bin
+call scripts\build-logo.bat || exit /b 1
 dbl -o bin\speedgraph src\speedgraph || exit /b 1
 dbl -o bin\orderdesk src\orderdesk && dblink -o bin\orderdesk.dbr bin\orderdesk bin\speedgraph WND:tklib.elb || exit /b 1
 dbl -o bin\bench src\bench && dblink -o bin\bench.dbr bin\bench || exit /b 1

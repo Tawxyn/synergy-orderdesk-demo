@@ -15,7 +15,9 @@ the database, DSN and configuration setup.
 Run from the repo root in a Synergy/DE x64 command prompt. There are no tests
 or linters; a clean compile and link is the check.
 
-- `build` (`build.bat`): compiles `src\` into `bin\` and links `orderdesk` with
+- `build` (`build.bat`): builds `src\logo.cpp` as `bin\orderlogo.dll` with the
+  x64 Visual Studio C++ tools and Windows SDK (`scripts\build-logo.bat` finds
+  the tools), compiles the DBL sources into `bin\`, and links `orderdesk` with
   `bin\speedgraph` (compiled separately) and `WND:tklib.elb`. It sets the `ODSRC` logical to `src\`, which every
   `.include "ODSRC:*.inc"` relies on; set `ODSRC` yourself if you call
   `dbl`/`dblink` directly (`dbl -o bin\<name> src\<name>`, then
@@ -53,7 +55,11 @@ method. `main` loops on `M_PROCESS`; toolbar buttons call `toolbar_method`,
 which re-signals the same menu entry names. The home panel is a borderless
 window sized from the Toolkit body (`g_first_row`/`g_last_row`/
 `g_screen_width` in `WND:gblctl.def`) and is redrawn by `home_refresh` on every
-loop.
+loop. `home_create` attaches the square-pixel title from `logo.cpp` to the home
+window; `home_reveal` reveals it once at startup, preserving menu and toolbar
+selections. The native control draws an 83 x 11 pixel design in integer-sized
+squares with three flat shades. It resizes with its parent, sits behind Toolkit
+popups, and is destroyed before Toolkit finishes and its DLL is unloaded.
 
 **Timed steps** (`nightly_report`, `post_batch`, and the console `bench.dbl`)
 count network round trips with `sys.dm_exec_connections.num_reads` for the
@@ -74,7 +80,8 @@ orders above seed order 10420.
 
 **Colours.** `theme.inc` names palette entries 11-15, set with `WP_PALET` at
 startup (Toolkit uses the lower entries). `accent_for` maps the driver token to
-the legacy (amber) or new (green) accent. The three `%ssc_cmd` settings in
+the legacy (amber) or new (green) accent. The pixel title uses a matching
+three-colour palette in its native control. The three `%ssc_cmd` settings in
 `main` are deliberate: the legacy driver accepts them and the new driver
 rejects each with "... is not supported; remove this option", which is the
 demo's migration step. `main` collects all failures, shows them together,

@@ -37,6 +37,7 @@ record
     ix          ,i4
     rowcnt      ,i4
     initialized ,i4
+    logo_shown  ,i4
     scale       ,d4
     scale_text  ,a10
     driver      ,a40
@@ -154,11 +155,21 @@ proc
     xcall tb_toolbar(TB_PLACE, tbid)
 
     xcall home_create
+    if (.not. od_logo)
+        goto shutdown
     repeat
     begin
         xcall home_refresh
         xcall e_sect("Choose a menu entry or toolbar button")
-        xcall m_process
+        if (.not. logo_shown) then
+        begin
+            xcall home_reveal
+            logo_shown = 1
+            if (.not. g_select)
+                xcall m_process
+        end
+        else
+            xcall m_process
         if (.not. g_select)
             nextloop
         clear g_select
@@ -176,7 +187,14 @@ proc
 shutdown,
     if (initialized)
         sts = %ssc_release(od_dbchn)
+    if (od_logodll)
+        xcall dll_call(od_logodll, DLL_TYPE_WINAPI, "OrderLogoDestroy", od_logo)
     xcall u_finish
+    if (od_logodll)
+    begin
+        xcall dll_call(od_logodll, DLL_TYPE_WINAPI, "OrderLogoShutdown")
+        sts = %dll_close(od_logodll)
+    end
     stop
 
 setting_failed,
@@ -1093,31 +1111,20 @@ proc
 endsubroutine
 
 ; Creates the home panel: a borderless window that fills the screen body,
-; behind every other window, with the logo and headings.
+; behind every other window. The logo is revealed after the figures load.
 subroutine home_create
 .include "WND:tools.def"
 .include "WND:gblctl.def"
 .include "DBLDIR:windows.def"
 .include "ODSRC:theme.inc"
-.define LOGO_WIDTH, 53
 global data section odstate
 .include "ODSRC:odstate.inc"
 endglobal
 stack record work
-    r           ,i4
-    col         ,i4
-    start       ,i4
     logo_col    ,i4
-    row         ,a53
-    blanks      ,a53
-record logo_rows
-    lr1         ,a53, " ###  ####  ####  ##### ####  ####  #####  #### #   #"
-    lr2         ,a53, "#   # #   # #   # #     #   # #   # #     #     #  # "
-    lr3         ,a53, "#   # ####  #   # ####  ####  #   # ####   ###  ###  "
-    lr4         ,a53, "#   # #  #  #   # #     #  #  #   # #         # #  # "
-    lr5         ,a53, " ###  #   # ####  ##### #   # ####  ##### ####  #   #"
-record ,x
-    logo        ,[5]a53
+    rows        ,i4
+    legacy      ,i4
+    parent      ,i8
 proc
     init work
     xcall w_proc(WP_CREATE, od_homeid, "HOME", g_last_row - g_first_row + 1, g_screen_width)
@@ -1125,36 +1132,83 @@ proc
     xcall w_brdr(od_homeid, WB_OFF)
     xcall w_area(od_homeid, WA_COLOR, PAL_BODY)
     xcall w_disp(od_homeid, WD_COLOR, PAL_BODY, WD_CLR, WDC_WND)
-    logo_col = (g_screen_width - LOGO_WIDTH) / 2 + 1
-    for r from 1 thru 5
-    begin
-        row = logo[r]
-        col = 1
-        while (col .le. LOGO_WIDTH)
-        begin
-            if (row(col:1) .ne. "#") then
-                incr col
-            else
-            begin
-                start = col
-                repeat
-                begin
-                    incr col
-                    if (col .gt. LOGO_WIDTH)
-                        exitloop
-                    if (row(col:1) .ne. "#")
-                        exitloop
-                end
-                xcall w_disp(od_homeid, WD_COLOR, od_accent, WD_POS, r + 1, logo_col + start - 1,
-&                   WD_ATTR, ATTR_LOAD + ATTR_RVRS, blanks(1:col - start), WD_ATTR, ATTR_LOAD)
-            end
-        end
-    end
+    logo_col = (g_screen_width - 53) / 2 + 1
     xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_POS, 7, logo_col + 1,
 &       "Order entry and nightly reporting on SQL Connection")
     xcall w_disp(od_homeid, WD_COLOR, PAL_HEAD, WD_ATTR, ATTR_LOAD + ATTR_BOLD,
 &       WD_POS, 9, 4, "Connection", WD_POS, 16, 4, "Activity", WD_ATTR, ATTR_LOAD)
     xcall u_window(D_PLACE, od_homeid, g_first_row, 1)
+    xcall u_update
+    ; A native child supplies square pixels independently of the Toolkit font.
+    onerror ($ERR_DLLOPNERR) logo_failed
+    if (.not. od_logodll)
+        od_logodll = %dll_open("bin\orderlogo.dll")
+    offerror
+    rows = g_last_row - g_first_row + 1
+    legacy = (od_accent .eq. PAL_LEGACY)
+    parent = %w_info(WIF_HWND, od_homeid)
+    od_logo = %dll_call(od_logodll, DLL_TYPE_WINAPI, "OrderLogoCreate", parent, legacy, rows)
+    if (.not. od_logo)
+        goto logo_failed
+    xreturn
+
+logo_failed,
+    offerror
+    xcall u_message("The pixel logo could not be created. Run build, then start OrderDesk again.", , D_ERROR)
+    xreturn
+endsubroutine
+
+; Reveals the square-pixel logo once at startup (about 0.7 seconds).
+; A menu or toolbar selection finishes the reveal without losing the action.
+subroutine home_reveal
+.include "WND:tools.def"
+.include "WND:tkctl.def"
+global data section odstate
+.include "ODSRC:odstate.inc"
+endglobal
+stack record work
+    frame       ,i4
+    amount      ,i4
+    start_us    ,i8
+    delay_us    ,i8
+    delay_secs  ,d6.3
+    entry       ,a10
+proc
+    init work
+    xcall u_update
+    start_us = %datetime_to_i8(%datetime)
+    for frame from 1 thru 24
+    begin
+        amount = frame * 1000 / 24
+        xcall dll_call(od_logodll, DLL_TYPE_WINAPI, "OrderLogoReveal", od_logo, amount)
+        xcall u_update
+        if (.not. g_select)
+            xcall m_process(, , 0)
+        if (g_select)
+        begin
+            if (g_entnam .eq. g_time_entry) then
+                clear g_select
+            else
+            begin
+                ; Consume any posted toolbar signal before handing it to main.
+                xcall m_signal(entry, D_REMOVE)
+                g_entnam = entry
+                g_select = 1
+                xcall dll_call(od_logodll, DLL_TYPE_WINAPI, "OrderLogoReveal", od_logo, %integer(1000, 4))
+                exitloop
+            end
+        end
+        if (frame .lt. 24)
+        begin
+            ; Include input processing in the frame budget.
+            delay_us = start_us + frame * 700000 / 24 - %datetime_to_i8(%datetime)
+            if (delay_us .gt. 0)
+            begin
+                delay_secs = delay_us / 1000000.0
+                sleep delay_secs
+            end
+        end
+    end
     xreturn
 endsubroutine
 

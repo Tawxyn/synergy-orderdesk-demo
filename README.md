@@ -8,6 +8,7 @@ Demo for the DevPartner 2026 session "Rebuilding SQL Connection from the Ground 
   connection settings from the ODBC era that the new driver no longer accepts.
 - `src\speedgraph.dbl` draws the live speed graph in OrderDesk's progress
   window.
+- `src\logo.cpp` draws the retro title with square pixels and three flat shades.
 - `src\bench.dbl` is the console version of the timed steps.
 - `src\errors.dbl` runs three failing statements and prints what the driver
   reports.
@@ -35,6 +36,8 @@ What the demo shows:
   Server driver. Connect strings starting `sqlserver:` use the new driver; the
   legacy `VTX12_SQLNATIVE:` strings use the Trifox driver.
 - Microsoft ODBC Driver 18 for SQL Server (x64), for the legacy driver.
+- To build: Visual Studio C++ x64 build tools and a Windows SDK, for the pixel
+  title helper. `build` finds an installed toolchain automatically.
 - SQL Server 2019 or later with SQL Server authentication enabled and TCP 1433
   reachable from the client.
 
@@ -115,6 +118,7 @@ orderdesk-demo\
     orderdesk.dbl         UI Toolkit app
     speedgraph.dbl        live speed graph, linked into orderdesk
     speedgraph.inc        the graph's shared state
+    logo.cpp              square-pixel title, built as bin\orderlogo.dll
     bench.dbl             console timed steps
     errors.dbl            three failing statements and what the driver reports
     config.inc            reads the active line of orderdesk.cfg (all three)
@@ -124,6 +128,7 @@ orderdesk-demo\
     setup.sql             database, login, grant, data and demo_runs table
     reset.sql             deletes demo orders and recorded runs
   scripts\
+    build-logo.bat        builds the native Windows title helper
     reset-demo.ps1        resets the data and runs bench on each driver
   assets\                 toolbar icons, from the UI Toolkit examples
   bin\                    build output (gitignored)
