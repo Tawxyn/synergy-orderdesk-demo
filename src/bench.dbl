@@ -1,7 +1,7 @@
 ; OrderDesk bench: the console version of OrderDesk's timed steps. Places an
 ; order, runs the nightly report, then posts a batch of orders, timing each
 ; step and counting the network round trips it took.
-; Reads its connect string from orderdesk.cfg in the current directory.
+; Reads its connect string from the SQL_CONNECT environment variable.
 
 .main
     .include "CONNECTDIR:ssql.def"
@@ -18,7 +18,6 @@
         sts,            i4
         len,            i4
         ix,             i4
-        cfgch,          i4
         rowcnt,         i4
         rows,           i4
         tick,           i4
@@ -35,7 +34,6 @@
         database,       a128
         stage,          a32
         secs_text,      a16
-        line,           a512
         connect,        a512
         sqlp,           a256
         trips_sql,      a256

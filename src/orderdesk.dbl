@@ -1,5 +1,5 @@
 ; OrderDesk: a UI Toolkit order-entry application on SQL Connection.
-; Reads its connect string from orderdesk.cfg in the current directory.
+; Reads its connect string from the SQL_CONNECT environment variable.
 
 main orderdesk
 .include "CONNECTDIR:ssql.def"
@@ -30,7 +30,6 @@ record
     selcol      ,i4
     tbid        ,i4
     xoff        ,i4
-    cfgch       ,i4
     cur         ,i4
     sts         ,i4
     len         ,i4
@@ -45,7 +44,6 @@ record
     problems    ,i4
     rejected    ,a2048
     stage       ,a32
-    line        ,a512
     connect     ,a512
     sqlp        ,a256
     msg         ,a1024

@@ -13,13 +13,13 @@ Demo for the DevPartner 2026 session "Rebuilding SQL Connection from the Ground 
 - `src\errors.dbl` runs three failing statements and prints what the driver
   reports.
 
-Switching between the legacy SQL Connection driver and the new one is one line
-in `orderdesk.cfg`.
+Switch between the legacy SQL Connection driver and the new one by setting
+`SQL_CONNECT` in the current command prompt and restarting the app.
 
 What the demo shows:
 
-- **Drop-in, mostly.** The same `.dbr` runs on both drivers after a one-line
-  config change, unless the app uses settings the new driver retired. The
+- **Drop-in, mostly.** The same `.dbr` runs on both drivers after changing
+  `SQL_CONNECT`, unless the app uses settings the new driver retired. The
   driver names each one ("... is not supported; remove this option"), and
   removing them is a small edit.
 - **No DSN, no ODBC.** The new connect string names the server directly.
@@ -65,9 +65,15 @@ password you choose for the demo login.
 
 ## 3. Configure and build
 
-4. `copy orderdesk.cfg.example orderdesk.cfg`, then replace both `CHANGE_ME`
-   with `<password>` and `your-sql-server` with `<server>`. `orderdesk.cfg` is
-   gitignored.
+4. In a Synergy/DE x64 command prompt, set the legacy connection:
+
+   ```bat
+   set "SQL_CONNECT=VTX12_SQLNATIVE:orderdesk/<password>/OrderDeskDSN"
+   ```
+
+   Use `set` so the connection stays in this command prompt and its child
+   processes. The programs read only `SQL_CONNECT`; no configuration file is
+   needed.
 5. In a Synergy/DE x64 command prompt, in this folder: `build`. It compiles
    `src\` into `bin\`: `orderdesk` (linked with `speedgraph` and
    `WND:tklib.elb`), `bench` and `errors`.
@@ -80,29 +86,37 @@ console programs with `dbs bin\bench` and `dbs bin\errors`, from the repo root.
 the screen. The starting size is 175%; `set ORDERDESK_SCALE=` another
 percentage to change it.
 
-6. With the `VTX12_SQLNATIVE` line active: `run`. Try **Reports > Nightly
+6. With `SQL_CONNECT` set to `VTX12_SQLNATIVE:...`: `run`. Try **Reports > Nightly
    report**, **Orders > Post batch**, **Customers > Browse** and **Orders > New
    order**.
-7. In `orderdesk.cfg`, put a `;` in front of the `VTX12_SQLNATIVE` line and
-   remove it from the other `SQL_CONNECT` line. Save.
+7. Close OrderDesk, then switch the connection in the same command prompt:
+
+   ```bat
+   set "SQL_CONNECT=sqlserver:orderdesk/<password>/<server>/1433"
+   ```
+
+   Each launch reads the current value. Switching connections does not need
+   a rebuild.
 8. `run` again. It stops with "rejected 3 connection settings"; the messages
    are also in `orderdesk.log`. Remove the three `%ssc_cmd` calls after the
    `; ODBC-era connection settings` comment in `src\orderdesk.dbl`, `build`,
    and `run`. Run the report and the batch, then **Reports > Compare runs**.
 9. **File > Start fresh** deletes the recorded runs and demo orders, so the
    scoreboard and Compare runs start empty.
-   `powershell -ExecutionPolicy Bypass -File scripts\reset-demo.ps1` does the
-   same, runs `bench` once on each driver so both start with SQL Server's cache
-   warm, and makes the legacy line active.
+   With the direct `sqlserver:` connection set, run
+   `powershell -ExecutionPolicy Bypass -File scripts\reset-demo.ps1` to do the
+   same from the command prompt. It leaves `SQL_CONNECT` unchanged. To warm
+   both drivers, run `dbs bin\bench` once with each connection before resetting.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| "could not start: reading orderdesk.cfg" | Run from this folder; `orderdesk.cfg` needs one active `SQL_CONNECT=` line |
+| "SQL_CONNECT is not set" | Set `SQL_CONNECT` in the command prompt used to launch the program |
+| "invalid SQL_CONNECT" | Use a connection string with a driver token followed by `:` |
 | "could not start: connecting" on `VTX12_SQLNATIVE` | **Test Data Source** on `OrderDeskDSN` |
-| "could not start: connecting" on the new line | `Test-NetConnection <server> -Port 1433`; "could not be loaded" means the new driver's library is missing |
-| "rejected 3 connection settings" on `VTX12_SQLNATIVE` | Expected only on the new driver; check which line is active |
+| "could not start: connecting" on `sqlserver` | `Test-NetConnection <server> -Port 1433`; "could not be loaded" means the new driver's library is missing |
+| "rejected 3 connection settings" on `VTX12_SQLNATIVE` | Expected only on the new driver; check `SQL_CONNECT` in the launching prompt |
 | "Counting round trips ... failed" | Rerun `sql\setup.sql` (it grants `VIEW SERVER STATE`) |
 | Compare runs is empty | Run the report or batch first |
 
@@ -113,7 +127,6 @@ orderdesk-demo\
   README.md
   build.bat               compiles src\ into bin\
   run.bat                 starts OrderDesk with scale-on-maximize
-  orderdesk.cfg.example   both connect strings; copy to orderdesk.cfg
   src\
     orderdesk.dbl         UI Toolkit app
     speedgraph.dbl        live speed graph, linked into orderdesk
@@ -121,7 +134,7 @@ orderdesk-demo\
     logo.cpp              square-pixel title, built as bin\orderlogo.dll
     bench.dbl             console timed steps
     errors.dbl            three failing statements and what the driver reports
-    config.inc            reads the active line of orderdesk.cfg (all three)
+    config.inc            reads SQL_CONNECT from the environment (all three)
     odstate.inc           OrderDesk's shared state
     theme.inc             OrderDesk's colour palette entries
   sql\
@@ -129,12 +142,11 @@ orderdesk-demo\
     reset.sql             deletes demo orders and recorded runs
   scripts\
     build-logo.bat        builds the native Windows title helper
-    reset-demo.ps1        resets the data and runs bench on each driver
+    reset-demo.ps1        resets the data using the direct SQL_CONNECT value
   assets\                 toolbar icons, from the UI Toolkit examples
   bin\                    build output (gitignored)
 ```
 
-Run everything from the repo root: OrderDesk reads `orderdesk.cfg` and loads
-`assets\` from the current folder (`run.bat` and `build.bat` switch to it
-themselves). The `.dbl` files include `ODSRC:*.inc`; `build.bat` sets `ODSRC`
-to `src\`.
+Run everything from the repo root: OrderDesk loads `assets\` from the current
+folder (`run.bat` and `build.bat` switch to it themselves). The `.dbl` files
+include `ODSRC:*.inc`; `build.bat` sets `ODSRC` to `src\`.

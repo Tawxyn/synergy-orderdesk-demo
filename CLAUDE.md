@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A traditional Synergy DBL demo of SQL Connection: the same programs run on the
 legacy SQL Server driver (Trifox `VTX12_SQLNATIVE` over ODBC and a DSN) or on
-the new Synergex driver, switched by one line in `orderdesk.cfg`. Windows x64
+the new Synergex driver, switched through the process's `SQL_CONNECT`. Windows x64
 only for the UI app; SQL Server is reached over the network. `README.md` has
 the database, DSN and configuration setup.
 
@@ -26,24 +26,28 @@ or linters; a clean compile and link is the check.
   `SYN_RESIZE_SCALE=1`. UI Toolkit does not run under `dbs`; on Windows, `dbr`
   output from console programs opens a window that closes at exit.
 - `dbs bin\bench` / `dbs bin\errors`: the console programs.
-- `powershell -ExecutionPolicy Bypass -File scripts\reset-demo.ps1`: warms up
-  both drivers with `bench`, runs `sql\reset.sql`, makes the legacy line active.
+- `powershell -ExecutionPolicy Bypass -File scripts\reset-demo.ps1`: runs
+  `sql\reset.sql` using the current direct `sqlserver:` connection in
+  `SQL_CONNECT`. Run `bench` once with each connection before resetting when
+  both drivers need warming. The helper leaves `SQL_CONNECT` unchanged.
 - `sql\setup.sql` rebuilds the `OrderDesk` database from scratch (drops it
   first); it needs SQLCMD mode for `$(DemoPassword)`.
 
-Programs read `orderdesk.cfg` and load `assets\` relative to the current
-folder, so they must run from the repo root. Files use CRLF (`.gitattributes`).
+Programs read `SQL_CONNECT` from the launching environment and load `assets\`
+relative to the current folder, so they must run from the repo root. Use `set`
+in the demo's command prompt to keep connection changes local to that prompt.
+There is no configuration-file fallback. Files use CRLF (`.gitattributes`).
 
 ## Architecture
 
-**Driver switch.** `src\config.inc` (included by all three programs) takes the
-first line starting `SQL_CONNECT=` in `orderdesk.cfg`; lines starting `;` are
-commented out. The text before the first `:` is shown as the driver. The DBL
-runtime, not this code, picks the library: on driver-selection builds
-`sqlserver:` goes to `rssql.dll` and everything else to Trifox `vtxapits.dll`;
-older single-DLL builds use `vtx12_syn:` for the new driver. The new driver's
-connect string has no database, so the `orderdesk` login's default database
-(set in `setup.sql`) selects `OrderDesk`.
+**Driver switch.** `src\config.inc` (included by all three programs) reads
+`SQL_CONNECT` with `GETLOG` and rejects an unset value or a missing driver
+token. The text before the first `:` is shown as the driver. The DBL runtime,
+not this code, picks the library: `sqlserver:` goes to `rssql.dll` and
+everything else to Trifox `vtxapits.dll`. Set `SQL_CONNECT` in the current
+command prompt, then restart the app to switch drivers; no rebuild is needed.
+The new driver's connect string has no database, so the `orderdesk` login's
+default database (set in `setup.sql`) selects `OrderDesk`.
 
 **`src\orderdesk.dbl`** is a UI Toolkit app built entirely in code (menus,
 toolbar, input windows, lists; no window scripts). Shared state lives in the
